@@ -119,6 +119,13 @@ async function settle(c: Ctx, mondayPrice: number, voidIt = false) {
   expect(failed(r), logs(r)).toBe(false);
 }
 
+async function settledAt(c: Ctx) {
+  const t = Number((await fetchMarket(c)).settledAt);
+  expect(t).toBe(Number(c.h.context.getClock().unixTimestamp));
+  expect(t).toBeGreaterThan(0);
+  return t;
+}
+
 function payoutAccounts(c: Ctx, b: Buyer, to: PublicKey = b.usdc) {
   return {
     owner: b.kp.publicKey, market: c.a.market, position: b.position, vaultAuthority: c.a.vaultAuthority,
@@ -245,9 +252,10 @@ describe("sweep", () => {
     const b = await buy(c, 10, 120_000n);
     await settle(c, 19_600_000);
     const caller = await stranger(c);
-    await warpTo(c.h.context, c.now + 30 * DAY);
+    const st = await settledAt(c);
+    await warpTo(c.h.context, st + 30 * DAY);
     expectError(send(c, caller, await sweepIx(c, caller.publicKey)), "TooEarly");
-    await warpTo(c.h.context, c.now + 30 * DAY + 1);
+    await warpTo(c.h.context, st + 30 * DAY + 1);
     const before = bal(c, c.dealerUsdc);
     const r = send(c, caller, await sweepIx(c, caller.publicKey));
     expect(failed(r), logs(r)).toBe(false);
@@ -316,7 +324,8 @@ describe("close_market", () => {
     const c = await setup();
     await buy(c, 10, 120_000n);
     await settle(c, 19_600_000);
-    await warpTo(c.h.context, c.now + 30 * DAY + 1);
+    const st = await settledAt(c);
+    await warpTo(c.h.context, st + 30 * DAY + 1);
     expect(failed(send(c, c.h.payer, await sweepIx(c, c.h.payer.publicKey)))).toBe(false);
     const r = send(c, c.h.payer, await closeIx(c, c.h.payer.publicKey));
     expect(failed(r), logs(r)).toBe(false);
