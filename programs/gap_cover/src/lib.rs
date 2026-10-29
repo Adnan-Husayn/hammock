@@ -1,6 +1,9 @@
 use anchor_lang::prelude::*;
 
+
 declare_id!("HzYCke4ESM4ripYknCuGu3Bk9XU3xRTmBoYkHaESMG9g");
+
+pub mod math;
 
 #[program]
 pub mod gap_cover {
