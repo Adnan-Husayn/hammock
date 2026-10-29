@@ -1,6 +1,6 @@
 # Monday Gap Cover: design spec
 
-Status: version 3.1, 30 October 2026. Revised after three rounds of review by Muse and GPT; both now call it ready to plan. This file is plain ASCII on purpose so formulas survive copy and paste.
+Status: version 3.2, 30 October 2026. Revised after three rounds of spec review by Muse and GPT, plus plan review by Muse, GPT and Gemini. This file is plain ASCII on purpose so formulas survive copy and paste.
 Target: Solana Foundation "Perps and Prediction Markets" hackathon, submissions close Saturday 5 December 2026
 
 ## 1. Product
@@ -59,10 +59,11 @@ Applies to both marks. For target time T:
   - `confidence * 10_000 <= price * conf_cap_bps` for that leg, in checked i128 (no division)
   - `publisherCount >= min_publishers`
 - Anyone may submit an eligible report during the submission window, from T until T + 7 minutes (sandbox: T + 5 seconds). The first becomes the candidate, and its submitter is stored.
-- A later eligible report replaces the candidate if it ranks lower on `(abs(feedUpdateTimestamp - T), feedUpdateTimestamp, sha256(payload))`. The order is total, so the outcome does not depend on submission order.
+- A later eligible report replaces the candidate only if it ranks strictly lower on `(abs(feedUpdateTimestamp - T), feedUpdateTimestamp)`. On an exact tie the earlier submission stays, so nobody can take the bounty without moving closer to T. The payload hash is used only off-chain, to deduplicate the archive.
 - After the window closes, anyone may call `finalise_friday` or `finalise_monday` for that leg. With a candidate, the mark is fixed and the stored submitter receives that leg's bounty from `BountyReserve`. Without one, the market moves to `Voided`.
 - The submitter pays the Lazer verifier's treasury fee (1 lamport) and its own transaction fee.
 - The verifier checks signatures only; the spike showed it accepts a 45-minute-old payload. Every check above runs in this program.
+- The program also checks the Ed25519 instruction's offsets header: one signature, and the signature, public key and message all point at the expected bytes, so the bytes it parses are exactly the bytes that were signed. The same check applies to dealer quotes in `buy`.
 - The dealer service publishes every signed update it receives within T - 5s to T + 5s to a public URL as it arrives, so anyone can submit a closer report without a Pyth Pro key. The program cannot prove that archive is complete, and the README says so: challenges are permissionless given the published archive, and the dealer could in principle withhold a report. Anyone with their own Pyth Pro access can still challenge.
 
 ## 6. Market parameters
@@ -177,7 +178,9 @@ No position token exists, so positions cannot be transferred.
 **Sandbox markets** (flag set at creation, never changeable). The program enforces these overrides:
 
 - `submit_report` takes the price as an argument and must be signed by the market's demo-authority key; Pyth payloads are not accepted
-- submission window 5 s; targets from creation: Friday at +5 s, buying close at +45 s, Monday at +60 s, so `finalise_monday` is possible at +65 s
+- the Friday price is set by the demo authority at creation and the market moves straight to `FridayFinal`
+- buying stays available until the judge presses "Ring the Monday bell" or 10 minutes pass, whichever is first; pressing it closes buying
+- the Monday price is then set by the demo authority and the market finalises immediately, with no submission window
 - Two modes, chosen when the judge starts a sandbox:
   - **gap:** after buying closes, the demo authority picks a Monday fall of 0.5%, 2.5% or 6% at random, so a judge cannot buy knowing the result
   - **multiplier void:** after the first sale the dealer service changes the test mint's multiplier, then submits the Monday price, and `finalise_monday` voids
@@ -194,7 +197,7 @@ Real markets never accept the demo authority.
 ## 12. Demo
 
 - Devnet only, with demo USDC and a Token-2022 test mint "NVDAx (test)" carrying the scaled-UI extension; the dealer service holds its mint and multiplier authority. A faucet button gives judges both tokens.
-- **Sandbox:** each judge starts a fresh sandbox market in gap mode and runs buy, settlement and claim in about 70 seconds, or in multiplier-void mode to see refunds.
+- **Sandbox:** each judge starts a fresh sandbox market in gap mode, buys at their own pace, rings the Monday bell and claims within seconds, or uses multiplier-void mode to see refunds. Sandbox quotes use the live NVDAx reference price when available and the last good value otherwise; the freeze does not apply.
 - **Real settlement before submission:** the weekend of Friday 27 November to Monday 30 November. Its Friday is an early close, so it also exercises the 12:59:30 ET rule, and Monday 30 November settles before the 5 December deadline. If the build is ready earlier, also settle 20 to 23 November. Transaction links go in the README.
 - **Fallback** if neither real weekend settles cleanly: a recorded real Friday mark plus a sandbox Monday, labelled as such.
 - **Recorded, not live:** the old-payload rejection and the tampered-payload rejection, as transaction links and unit tests.
