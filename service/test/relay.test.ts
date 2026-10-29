@@ -5,7 +5,7 @@ import {
 import { readFileSync } from "node:fs";
 import { BorshAccountsCoder, BN } from "@coral-xyz/anchor";
 import { checkRelay, relay, RELAYABLE, RelayRefused, sandboxMarketCheck, type RelayContext } from "../src/relay.ts";
-import { serviceServer, RELAY_MIN_LAMPORTS, RELAY_PER_MINUTE_IP, RELAY_PER_MINUTE_USER, FAUCET_PER_MINUTE } from "../src/server.ts";
+import { serviceServer, clientIp, RateLimit, RELAY_MIN_LAMPORTS, RELAY_PER_MINUTE_IP, RELAY_PER_MINUTE_USER, FAUCET_PER_MINUTE } from "../src/server.ts";
 import { signQuote } from "../src/quote.ts";
 
 const programId = Keypair.generate().publicKey;
@@ -191,5 +191,22 @@ describe("HTTP limits", () => {
       for (let i = 0; i < FAUCET_PER_MINUTE; i++) expect(await post(u, "/faucet", { wallet: Keypair.generate().publicKey.toBase58() })).toBe(200);
       expect(await post(u, "/faucet", { wallet: Keypair.generate().publicKey.toBase58() })).toBe(429);
     });
+  });
+});
+
+describe("RateLimit and client IP", () => {
+  it("evicts keys idle for a minute", () => {
+    const r = new RateLimit(1);
+    expect(r.take("a", 0)).toBe(true);
+    expect(r.take("a", 1)).toBe(false);
+    r.take("b", 70_000);
+    expect((r as any).hits.has("a")).toBe(false);
+    expect(r.take("a", 70_001)).toBe(true);
+  });
+  it("uses X-Forwarded-For only when TRUST_PROXY is on", () => {
+    const req = { headers: { "x-forwarded-for": "1.2.3.4, 10.0.0.1" }, socket: { remoteAddress: "10.0.0.1" } } as any;
+    expect(clientIp(req, false)).toBe("10.0.0.1");
+    expect(clientIp(req, true)).toBe("1.2.3.4");
+    expect(clientIp({ headers: {}, socket: { remoteAddress: "5.5.5.5" } } as any, true)).toBe("5.5.5.5");
   });
 });

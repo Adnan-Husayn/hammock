@@ -9,7 +9,7 @@ import { Freeze } from "../src/pricing.ts";
 import {
   Quoter, decodeLastNonce, decodeMarket, encodeQuote, signQuote, type MarketInfo, type Quote,
 } from "../src/quote.ts";
-import { Sandbox, encodeSandboxParams, type SandboxChain } from "../src/sandbox.ts";
+import { Sandbox, devnetSandboxChain, encodeSandboxParams, type SandboxChain } from "../src/sandbox.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const idl = JSON.parse(readFileSync(join(ROOT, "idl", "gap_cover.json"), "utf8"));
@@ -251,8 +251,33 @@ describe("Sandbox", () => {
   });
   it("refuses a bell on a real market", async () => {
     const { chain } = fakeChain("gap");
-    chain.readMarket = async () => market({ sandbox: false });
     const sb = new Sandbox(chain, { reference: () => null, recordFridayRef: () => {} });
+    await sb.start("gap");
+    chain.readMarket = async () => market({ sandbox: false });
     await expect(sb.bell(pk(42))).rejects.toThrow(/not a sandbox/);
+  });
+  it("refuses a bell on a market this service did not start, before reading or signing anything", async () => {
+    const { chain, log } = fakeChain("multiplierVoid");
+    let reads = 0;
+    chain.readMarket = async () => { reads++; return market({ sandbox: true, sandboxMode: "multiplierVoid" }); };
+    const sb = new Sandbox(chain, { reference: () => null, recordFridayRef: () => {} });
+    await expect(sb.bell(pk(77))).rejects.toThrow(/not a sandbox market this service started/);
+    expect(reads).toBe(0);
+    expect(log).toEqual([]);
+  });
+  it("devnet adapter reads a look-alike account owned by another program as no market, so the bell refuses", async () => {
+    const data = await new BorshAccountsCoder(idl).encode("Market", marketFields({ sandboxMode: { MultiplierVoid: {} } }));
+    const programId = pk(50);
+    const conn = { getAccountInfo: async () => ({ data, owner: pk(51), lamports: 1, executable: false }) } as any;
+    const chain = devnetSandboxChain({ conn, programId, dealer: Keypair.generate(), demo: Keypair.generate(), quoteKey: pk(16), usdcMint: pk(11), nvdaxMint: pk(10) });
+    expect(await chain.readMarket(pk(42))).toBeNull();
+    let multiplier = 0;
+    chain.changeMultiplier = async () => { multiplier++; };
+    const sb = new Sandbox(chain, { reference: () => null, recordFridayRef: () => {}, created: new Set([pk(42).toBase58()]) });
+    await expect(sb.bell(pk(42))).rejects.toThrow(/not a sandbox market/);
+    expect(multiplier).toBe(0);
+    // Owned by gap_cover, the same bytes decode.
+    const owned = devnetSandboxChain({ conn: { getAccountInfo: async () => ({ data, owner: programId }) } as any, programId, dealer: Keypair.generate(), demo: Keypair.generate(), quoteKey: pk(16), usdcMint: pk(11), nvdaxMint: pk(10) });
+    expect((await owned.readMarket(pk(42)))?.sandbox).toBe(true);
   });
 });

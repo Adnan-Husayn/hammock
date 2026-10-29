@@ -71,3 +71,10 @@ The service only treats an account as a market when the gap_cover program owns i
 **Sandbox multiplier-void demo.** In this mode the service changes the test mint's multiplier when the judge rings
 the Monday bell, after buying has closed, rather than right after the first sale. It then submits a Monday price
 equal to the Friday price, and `finalise_monday` voids the market so buyers can claim refunds.
+The Monday bell acts only on sandbox markets this service started (kept in `logs/sandbox-markets.json`, path set by
+`SANDBOX_MARKETS_PATH`). Multiplier-void mode only ever changes the configured NVDAx (test) mint from
+`config/devnet.json`, never a mint read from an account.
+
+**Deployment behind a proxy.** Per-IP limits use the socket address by default. Set `TRUST_PROXY=1` only when the
+service sits behind a reverse proxy you control. The limits then use the first `X-Forwarded-For` hop, which a client
+can forge when no proxy is in front.

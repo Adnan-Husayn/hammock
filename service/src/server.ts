@@ -19,6 +19,8 @@ export type ServiceDeps = {
   /** Relay key balance in lamports; the relay stops co-signing below RELAY_MIN_LAMPORTS. */
   relayBalance(): Promise<number>;
   nowMs?: () => number;
+  /** Behind a reverse proxy (TRUST_PROXY=1): key per-IP limits on the first X-Forwarded-For hop. Off by default. */
+  trustProxy?: boolean;
 };
 
 const MAX_BODY = 16 * 1024;
@@ -35,13 +37,25 @@ export class RateLimit {
   constructor(limit: number) {
     this.limit = limit;
   }
+  private lastSweep = 0;
   take(key: string, nowMs: number): boolean {
+    if (nowMs - this.lastSweep >= 60_000) {
+      // Evict keys with no hits in the last minute so the map does not grow without bound.
+      for (const [k, v] of this.hits) if (!v.some((t) => nowMs - t < 60_000)) this.hits.delete(k);
+      this.lastSweep = nowMs;
+    }
     const h = (this.hits.get(key) ?? []).filter((t) => nowMs - t < 60_000);
     if (h.length >= this.limit) return (this.hits.set(key, h), false);
     h.push(nowMs);
     this.hits.set(key, h);
     return true;
   }
+}
+
+export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
+  const fwd = req.headers["x-forwarded-for"];
+  const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(",")[0]?.trim();
+  return trustProxy && first ? first : (req.socket.remoteAddress ?? "?");
 }
 
 class HttpError extends Error {
@@ -136,7 +150,7 @@ export function serviceServer(d: ServiceDeps): Server {
         case "POST /relay": {
           const { transaction } = await body(req);
           if (typeof transaction !== "string") throw new HttpError(400, "transaction must be base64");
-          if (!relayIp.take(req.socket.remoteAddress ?? "?", now())) throw new HttpError(429, "too many relay requests, try again in a minute");
+          if (!relayIp.take(clientIp(req, d.trustProxy ?? false), now())) throw new HttpError(429, "too many relay requests, try again in a minute");
           if ((await d.relayBalance()) < RELAY_MIN_LAMPORTS) throw new HttpError(503, "relay is out of fee funds");
           const out = await d.relay(Buffer.from(transaction, "base64"));
           if (!relayUser.take(out.user.toBase58(), now())) throw new HttpError(429, "too many relay requests for this wallet, try again in a minute");
@@ -179,6 +193,24 @@ export function keypairFromEnv(name: string, env: NodeJS.ProcessEnv = process.en
   const p = env[name];
   if (!p) throw new Error(`${name} is not set`);
   return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(p, "utf8"))));
+}
+
+/** Sandbox markets this service started, persisted so the bell still works after a restart. */
+class PersistedSet {
+  private s: Set<string>;
+  private path: string;
+  constructor(path: string) {
+    this.path = path;
+    this.s = new Set(existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : []);
+  }
+  has(k: string) {
+    return this.s.has(k);
+  }
+  add(k: string) {
+    this.s.add(k);
+    mkdirSync(dirname(this.path), { recursive: true });
+    writeFileSync(this.path, JSON.stringify([...this.s]));
+  }
 }
 
 /** f_x per market, persisted so a restart keeps it. */
@@ -236,6 +268,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
   const sandbox = new Sandbox(devnetSandboxChain(setup), {
     reference: () => freeze.current ?? freeze.lastGood,
     recordFridayRef: (m, p) => refs.set(m, p),
+    created: new PersistedSet(env.SANDBOX_MARKETS_PATH ?? join(ROOT, "logs", "sandbox-markets.json")),
   });
   const quoter = new Quoter({
     readMarket: (m) => readMarket(conn, programId, m),
@@ -259,6 +292,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
     faucet: (w) => faucet(setup, w),
     relayPayer: feePayer.publicKey,
     relayBalance: () => conn.getBalance(feePayer.publicKey, "confirmed"),
+    trustProxy: env.TRUST_PROXY === "1" || env.TRUST_PROXY === "true",
   });
   server.listen(cfg.httpPort, () => console.log(`dealer service on :${cfg.httpPort}`));
   return server;

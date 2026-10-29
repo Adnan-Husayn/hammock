@@ -3,7 +3,7 @@ import {
   TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction,
   createUpdateMultiplierDataInstruction, getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
-import { decodeMarket, type MarketInfo } from "./quote.ts";
+import { readMarket as readGapMarket, type MarketInfo } from "./quote.ts";
 import type { Reference } from "./jupiter.ts";
 
 export type SandboxMode = "gap" | "multiplierVoid";
@@ -20,18 +20,21 @@ export interface SandboxChain {
   /** submit_sandbox_price(Monday): closes buying on chain. */
   submitMondayPrice(market: PublicKey, price: bigint): Promise<void>;
   finaliseMonday(market: PublicKey): Promise<void>;
-  /** Change the test mint's effective multiplier now (multiplier-void mode). */
-  changeMultiplier(mint: PublicKey): Promise<void>;
+  /** Change the configured NVDAx (test) mint's effective multiplier now (multiplier-void mode). Never a mint read from an account. */
+  changeMultiplier(): Promise<void>;
 }
 
 export type SandboxDeps = {
   reference(): Reference | null;
   recordFridayRef(market: PublicKey, price: number): void;
+  /** Markets this service created via start(); the bell acts on nothing else. Defaults to an in-memory set. */
+  created?: { has(market: string): boolean; add(market: string): void };
   rng?: () => number;
 };
 
 export class Sandbox {
   private rung = new Set<string>();
+  private created: { has(market: string): boolean; add(market: string): void };
   private rng: () => number;
 
   private chain: SandboxChain;
@@ -41,6 +44,7 @@ export class Sandbox {
     this.chain = chain;
     this.d = d;
     this.rng = d.rng ?? Math.random;
+    this.created = d.created ?? new Set<string>();
   }
 
   bellRung(market: PublicKey): boolean {
@@ -51,6 +55,7 @@ export class Sandbox {
     const ref = this.d.reference();
     const fridayPrice = ref ? BigInt(Math.round(ref.price * 1e5)) : FALLBACK_FRIDAY_PRICE;
     const market = await this.chain.createSandboxMarket(mode, fridayPrice);
+    this.created.add(market.toBase58());
     this.d.recordFridayRef(market, ref ? ref.price : Number(fridayPrice) / 1e5);
     return { market, fridayPrice, mode };
   }
@@ -63,6 +68,7 @@ export class Sandbox {
    */
   async bell(market: PublicKey): Promise<{ mode: SandboxMode; fallBps: number | null; mondayPrice: bigint }> {
     const key = market.toBase58();
+    if (!this.created.has(key)) throw new Error("not a sandbox market this service started");
     const mk = await this.chain.readMarket(market);
     if (!mk || !mk.sandbox) throw new Error("not a sandbox market");
     if (mk.state !== "FridayFinal" || mk.monday || !mk.friday) throw new Error("bell already rung");
@@ -76,7 +82,7 @@ export class Sandbox {
       fallBps = SANDBOX_FALLS_BPS[Math.min(SANDBOX_FALLS_BPS.length - 1, Math.floor(this.rng() * SANDBOX_FALLS_BPS.length))];
       mondayPrice = (friday * BigInt(10_000 - fallBps)) / 10_000n;
     } else {
-      await this.chain.changeMultiplier(mk.nvdaxMint);
+      await this.chain.changeMultiplier();
     }
     await this.chain.submitMondayPrice(market, mondayPrice);
     await this.chain.finaliseMonday(market);
@@ -138,10 +144,9 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
     ],
     data: Buffer.concat([Buffer.from(IX.submit_sandbox_price), Buffer.from([leg]), i64(price)]),
   });
-  const readMarket = async (m: PublicKey) => {
-    const a = await s.conn.getAccountInfo(m, "confirmed");
-    return a ? decodeMarket(a.data) : null;
-  };
+  // Owner-checked: an account not owned by gap_cover reads as null.
+  const readMarket = (m: PublicKey) => readGapMarket(s.conn, s.programId, m);
+
   return {
     readMarket,
     async createSandboxMarket(mode, fridayPrice) {
@@ -199,7 +204,8 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
         ix,
       ]);
     },
-    async changeMultiplier(mint) {
+    async changeMultiplier() {
+      const mint = s.nvdaxMint; // from config/devnet.json only
       const now = BigInt(Math.floor(Date.now() / 1000)) - 5n; // effective immediately
       await send(s.conn, s.dealer, [createUpdateMultiplierDataInstruction(mint, s.dealer.publicKey, 1.01, now, [], TOKEN_2022_PROGRAM_ID)]);
     },
