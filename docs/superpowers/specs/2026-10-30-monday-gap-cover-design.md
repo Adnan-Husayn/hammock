@@ -1,6 +1,6 @@
 # Monday Gap Cover: design spec
 
-Status: version 3, 30 October 2026. Revised after two rounds of review by Muse and GPT. This file is plain ASCII on purpose so formulas survive copy and paste.
+Status: version 3.1, 30 October 2026. Revised after three rounds of review by Muse and GPT; both now call it ready to plan. This file is plain ASCII on purpose so formulas survive copy and paste.
 Target: Solana Foundation "Perps and Prediction Markets" hackathon, submissions close Saturday 5 December 2026
 
 ## 1. Product
@@ -50,7 +50,7 @@ States: `Created -> FridayFinal -> (buying until close) -> MondayFinal`, or `Voi
 
 Applies to both marks. For target time T:
 
-- An eligible report is a Pyth Pro update for feed 1314 that passes Pyth's Lazer verifier (`pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt`, called by CPI, with the Ed25519 instruction placed before it in the same transaction), and in which:
+- An eligible report is a Pyth Pro update for feed 1314 that passes Pyth's Lazer verifier (`pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt`), called by CPI with `ed25519_instruction_index = 0`. The transaction must carry the Ed25519 signature instruction at index 0 and `submit_report` at index 1; the program checks both indexes through the instructions sysvar and rejects any other layout. Compute-budget instructions, if any, come after index 1. In the report:
   - `marketSession == regular`
   - `feedUpdateTimestamp == timestampUs` exactly
   - `T - 5s <= feedUpdateTimestamp <= T + 5s`
@@ -84,9 +84,9 @@ After the first sale, the dealer can stop issuing quotes and nothing else.
 
 The dealer service prices off-chain when a quote is requested.
 
-**NVDAx reference price and liquidity.** The service asks Jupiter for a 1,000 USDC to NVDAx quote, receiving `t` NVDAx raw units, then for a quote selling exactly `t` back to USDC, receiving `u` USDC. With the mint's current effective multiplier `k` and 8 decimals:
+**NVDAx reference price and liquidity.** The service asks Jupiter for a 1,000 USDC to NVDAx quote, receiving `t` NVDAx raw units, then for a quote selling exactly `t` back to USDC, receiving `u` USDC. With the mint's current effective multiplier `k` and its decimals `d` read from the mint account (8 for NVDAx):
 
-- `shares = t * k / 10^8`
+- `shares = t * k / 10^d`
 - `nvdax_price = 1000 / shares` (USD per share)
 - `round_trip_bps = (1000 - u) * 10_000 / 1000`
 
@@ -115,7 +115,7 @@ If `premium_per_contract >= 0.95` the service issues no quote. Coefficients are 
 
 **On-chain checks in `buy`:**
 
-- the Ed25519 instruction (read through the instructions sysvar) is by the dealer's key over exactly those fields
+- the Ed25519 instruction is at transaction index 0 and `buy` at index 1 (checked through the instructions sysvar), and it is by the dealer's key over exactly those fields
 - `0 < premium_per_contract < 1_000_000`
 - not expired by the Solana clock
 - `nonce == position.last_nonce + 1`
@@ -165,10 +165,10 @@ No position token exists, so positions cannot be transferred.
 | Instruction | Signer | Notes |
 |---|---|---|
 | `create_market` | dealer | funds both reserves |
-| `submit_report` | anyone (real); demo authority (sandbox) | real: Ed25519 instruction for the Pyth payload, then this instruction, which calls the Lazer verifier |
+| `submit_report` | anyone (real); demo authority (sandbox) | real: Ed25519 instruction for the Pyth payload at index 0, this instruction at index 1, which calls the Lazer verifier |
 | `finalise_friday` | anyone | reads the NVDAx mint; pays the Friday bounty |
 | `finalise_monday` | anyone | reads the NVDAx mint; computes payout; pays the Monday bounty |
-| `buy` | buyer | Ed25519 instruction for the dealer quote, then this instruction |
+| `buy` | buyer | Ed25519 instruction for the dealer quote at index 0, this instruction at index 1 |
 | `claim` | position owner | `MondayFinal` |
 | `refund` | position owner | `Voided` |
 | `sweep` | anyone | `MondayFinal`, after the claim deadline |
@@ -187,7 +187,7 @@ Real markets never accept the demo authority.
 
 ## 11. Off-chain parts
 
-- **Dealer service:** one server holding the Pyth Pro key and the dealer and demo-authority keys. It streams Pyth from all three Pyth Pro endpoints, archives and publishes updates around each target, submits reports and calls the finalise instructions for real markets, signs quotes, runs the freeze rule, and acts as the sandbox demo authority.
+- **Dealer service:** one server holding the Pyth Pro key and the dealer and demo-authority keys. It streams Pyth from all three Pyth Pro endpoints and drops duplicates by payload hash, archives and publishes updates around each target, submits reports and calls the finalise instructions for real markets, signs quotes, runs the freeze rule, and acts as the sandbox demo authority.
 - **Fee payer:** sandbox judge flows only (buy, claim, refund). The service builds the transaction with itself as fee payer and partially signs; the judge's wallet adds its signature. Real-market and dealer transactions pay their own fees.
 - **Frontend:** calculator, buy flow, locked view, and a settlement proof screen showing the signed price, session, timestamps, publishers, confidence and the escrow balance at finalisation.
 
@@ -209,6 +209,7 @@ Real markets never accept the demo authority.
 ## 14. Tests
 
 - payout at 0.5%, 1%, 2%, 5% and 10% falls and at a rise (pays 0, does not fail); rounding never exceeds escrow
+- transaction layout: Ed25519 instruction not at index 0, program instruction not at index 1
 - report eligibility: wrong feed, wrong session, carried-forward timestamp, outside window, confidence just above the cap, too few publishers, wrong exponent, zero price, tampered signature, a 45-minute-old payload
 - replacement ordering and ties
 - `finalise_friday` and `finalise_monday` with and without a candidate; bounty paid to the stored submitter; buying impossible before `FridayFinal`
