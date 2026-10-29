@@ -28,4 +28,20 @@ pub enum GapError {
     Overflow,
     #[msg("The submission window for this leg is still running")]
     WindowOpen,
+    #[msg("Quote message is malformed or not for this market")]
+    BadQuote,
+    #[msg("Quote nonce has already been used")]
+    QuoteUsed,
+    #[msg("Quote nonce must be the position's last nonce plus one")]
+    BadNonce,
+    #[msg("Quote has expired")]
+    QuoteExpired,
+    #[msg("Quote is for a different buyer")]
+    WrongBuyer,
+    #[msg("Premium per contract must be above 0 and below 1 USDC")]
+    BadPremium,
+    #[msg("Sale would exceed the market's contract cap")]
+    OverCapacity,
+    #[msg("Buying has closed for this market")]
+    BuyingClosed,
 }

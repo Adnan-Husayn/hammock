@@ -96,6 +96,60 @@ pub fn require_ed25519_at_index0(
     check_ed25519_layout(current, &ed.program_id, &ed.data, &me.data, expected_signer)
 }
 
+/// Dealer quotes: the Ed25519 instruction carries its own public key, signature and message
+/// (the layout `Ed25519Program.createInstructionWithPublicKey` builds): header, public key at 16,
+/// signature at 48, message at 112, every instruction index `u16::MAX` (this instruction).
+/// The message fills the rest of the data; its length is checked by the quote decoder.
+pub const INLINE_PK: u16 = 16;
+pub const INLINE_SIG: u16 = 48;
+pub const INLINE_MSG: u16 = 112;
+
+pub fn check_inline_ed25519(
+    current_index: u16,
+    ed_program: &Pubkey,
+    ed_data: &[u8],
+    expected_signer: Pubkey,
+) -> Result<Vec<u8>> {
+    require!(current_index == PROGRAM_IX_INDEX, SigError::WrongInstructionIndex);
+    require_keys_eq!(*ed_program, ed25519_program::ID, SigError::NotEd25519);
+    require!(ed_data.len() >= 2 && ed_data[0] == 1, SigError::SignatureCount);
+    require!(ed_data.len() >= ED25519_DATA_LEN, SigError::BadOffsets);
+    let o = Offsets {
+        sig: rd(ed_data, 2),
+        sig_ix: rd(ed_data, 4),
+        pk: rd(ed_data, 6),
+        pk_ix: rd(ed_data, 8),
+        msg: rd(ed_data, 10),
+        msg_len: rd(ed_data, 12),
+        msg_ix: rd(ed_data, 14),
+    };
+    require!(
+        o.sig_ix == u16::MAX && o.pk_ix == u16::MAX && o.msg_ix == u16::MAX,
+        SigError::BadOffsets
+    );
+    require!(
+        o.pk == INLINE_PK && o.sig == INLINE_SIG && o.msg == INLINE_MSG,
+        SigError::BadOffsets
+    );
+    // Length is checked by the caller's decoder so a wrong length reports as a bad quote;
+    // here the message must exactly fill the instruction after the header.
+    require!(ed_data.len() == INLINE_MSG as usize + o.msg_len as usize, SigError::BadOffsets);
+    let signer = Pubkey::new_from_array(ed_data[16..48].try_into().unwrap());
+    require_keys_eq!(signer, expected_signer, SigError::WrongSigner);
+    Ok(ed_data[INLINE_MSG as usize..].to_vec())
+}
+
+/// Reads the instructions sysvar and applies `check_inline_ed25519`.
+pub fn require_inline_ed25519_at_index0(
+    ix_sysvar: &AccountInfo,
+    expected_signer: Pubkey,
+) -> Result<Vec<u8>> {
+    let current = load_current_index_checked(ix_sysvar)?;
+    require!(current == PROGRAM_IX_INDEX, SigError::WrongInstructionIndex);
+    let ed = load_instruction_at_checked(0, ix_sysvar)?;
+    check_inline_ed25519(current, &ed.program_id, &ed.data, expected_signer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +220,32 @@ mod tests {
         assert!(run(1, &d).is_err());
         assert!(run(2, &header(1, [2, 2, 2], PREFIX as u16 + 4)).is_err());
         assert!(check_ed25519_layout(1, &Pubkey::default(), &good(), &target(), None).is_err());
+    }
+
+    fn inline(pk: [u8; 32], msg_len: u16, idx: u16) -> Vec<u8> {
+        let mut d = vec![1u8, 0];
+        for v in [INLINE_SIG, idx, INLINE_PK, idx, INLINE_MSG, msg_len, idx] {
+            d.extend(v.to_le_bytes());
+        }
+        d.extend(pk);
+        d.extend([0u8; 64]);
+        d.extend(vec![5u8; msg_len as usize]);
+        d
+    }
+    #[test]
+    fn inline_layout_accepts_and_rejects() {
+        let k = Pubkey::new_from_array([9; 32]);
+        let id = ed25519_program::ID;
+        assert_eq!(check_inline_ed25519(1, &id, &inline([9; 32], 96, u16::MAX), k).unwrap(), vec![5u8; 96]);
+        assert!(check_inline_ed25519(1, &id, &inline([8; 32], 96, u16::MAX), k).is_err());
+        assert!(check_inline_ed25519(1, &id, &inline([9; 32], 96, 1), k).is_err());
+        assert!(check_inline_ed25519(2, &id, &inline([9; 32], 96, u16::MAX), k).is_err());
+        assert!(check_inline_ed25519(1, &Pubkey::default(), &inline([9; 32], 96, u16::MAX), k).is_err());
+        let mut short = inline([9; 32], 96, u16::MAX);
+        short.pop();
+        assert!(check_inline_ed25519(1, &id, &short, k).is_err());
+        let mut two = inline([9; 32], 96, u16::MAX);
+        two[0] = 2;
+        assert!(check_inline_ed25519(1, &id, &two, k).is_err());
     }
 }

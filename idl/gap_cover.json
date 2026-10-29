@@ -236,6 +236,64 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "buy",
+      "discriminator": [
+        102,
+        6,
+        61,
+        18,
+        1,
+        218,
+        235,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "collateral_reserve",
+          "writable": true
+        },
+        {
+          "name": "buyer_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        }
+      ],
+      "args": []
     }
   ],
   "accounts": [
@@ -250,6 +308,19 @@
         227,
         198,
         154
+      ]
+    },
+    {
+      "name": "Position",
+      "discriminator": [
+        170,
+        188,
+        143,
+        228,
+        122,
+        64,
+        247,
+        208
       ]
     }
   ],
@@ -577,6 +648,30 @@
           }
         ]
       }
+    },
+    {
+      "name": "Position",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "contracts",
+            "type": "u32"
+          },
+          {
+            "name": "premium_paid",
+            "type": "u64"
+          },
+          {
+            "name": "last_nonce",
+            "type": "u64"
+          },
+          {
+            "name": "closed",
+            "type": "bool"
+          }
+        ]
+      }
     }
   ],
   "errors": [
@@ -644,6 +739,46 @@
       "code": 6112,
       "name": "WindowOpen",
       "msg": "The submission window for this leg is still running"
+    },
+    {
+      "code": 6113,
+      "name": "BadQuote",
+      "msg": "Quote message is malformed or not for this market"
+    },
+    {
+      "code": 6114,
+      "name": "QuoteUsed",
+      "msg": "Quote nonce has already been used"
+    },
+    {
+      "code": 6115,
+      "name": "BadNonce",
+      "msg": "Quote nonce must be the position's last nonce plus one"
+    },
+    {
+      "code": 6116,
+      "name": "QuoteExpired",
+      "msg": "Quote has expired"
+    },
+    {
+      "code": 6117,
+      "name": "WrongBuyer",
+      "msg": "Quote is for a different buyer"
+    },
+    {
+      "code": 6118,
+      "name": "BadPremium",
+      "msg": "Premium per contract must be above 0 and below 1 USDC"
+    },
+    {
+      "code": 6119,
+      "name": "OverCapacity",
+      "msg": "Sale would exceed the market's contract cap"
+    },
+    {
+      "code": 6120,
+      "name": "BuyingClosed",
+      "msg": "Buying has closed for this market"
     }
   ]
 }

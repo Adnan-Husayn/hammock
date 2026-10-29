@@ -8,6 +8,7 @@ pub mod instructions;
 pub mod lazer;
 pub mod math;
 pub mod pyth;
+pub mod quote;
 pub mod sigverify;
 pub mod state;
 pub mod token;
@@ -38,6 +39,10 @@ pub mod gap_cover {
 
     pub fn submit_sandbox_price(ctx: Context<SubmitSandboxPrice>, leg: Leg, price: i64) -> Result<()> {
         instructions::submit_report::submit_sandbox_price(ctx, leg, price)
+    }
+
+    pub fn buy(ctx: Context<Buy>) -> Result<()> {
+        instructions::buy::buy(ctx)
     }
 }
 

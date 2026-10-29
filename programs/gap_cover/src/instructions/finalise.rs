@@ -40,7 +40,7 @@ pub struct FinaliseFriday<'info> {
 }
 
 /// Require a token account of the market's token program, on the USDC mint, held by `owner`.
-fn require_usdc_account(acct: &AccountInfo, market: &Market, owner: &Pubkey) -> Result<()> {
+pub(crate) fn require_usdc_account(acct: &AccountInfo, market: &Market, owner: &Pubkey) -> Result<()> {
     require_keys_eq!(*acct.owner, market.token_program, GapError::InvalidMint);
     let d = acct.try_borrow_data()?;
     require!(d.len() >= 165, GapError::InvalidMint);

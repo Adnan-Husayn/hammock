@@ -20,6 +20,8 @@ pub const BAND_LOWER_BPS: u16 = 100;
 pub const BAND_UPPER_BPS: u16 = 500;
 pub const BOUNTY_PER_LEG: u64 = 100_000;
 pub const CONTRACT_UNIT: u64 = 1_000_000;
+/// Sandbox buying stays available for at most this long after the Friday price (spec section 10).
+pub const SANDBOX_BUYING_S: i64 = 600;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, Default, InitSpace)]
 pub enum MarketState {
@@ -113,4 +115,14 @@ impl Market {
             Leg::Monday => &mut self.monday,
         }
     }
+}
+
+/// Position PDA ["position", market, buyer] (spec section 10).
+#[account]
+#[derive(Debug, Default, InitSpace)]
+pub struct Position {
+    pub contracts: u32,
+    pub premium_paid: u64,
+    pub last_nonce: u64,
+    pub closed: bool,
 }
