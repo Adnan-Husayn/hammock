@@ -1,0 +1,6 @@
+{
+  "name": "monday-gap-cover",
+  "private": true,
+  "type": "module",
+  "dependencies": { "ws": "^8.18.0" }
+}

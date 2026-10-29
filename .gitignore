@@ -1,4 +1,9 @@
-node_modules/
 .env*
+node_modules/
 target/
 .anchor/
+logs/
+data/*.csv
+!data/marks.csv
+data/test-*.csv
+superpowers
