@@ -198,6 +198,7 @@ pub fn finalise_monday(ctx: Context<Finalise>) -> Result<()> {
     } else {
         market.payout_per_contract = payout;
         market.state = MarketState::MondayFinal;
+        market.settled_at = now;
         msg!("Monday mark final; payout per contract {}", payout);
     }
     Ok(())

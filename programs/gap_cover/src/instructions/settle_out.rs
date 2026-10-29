@@ -129,14 +129,12 @@ pub fn sweep(ctx: Context<Sweep>) -> Result<()> {
     // Only MondayFinal: escrow in Voided holds refunds, which never expire.
     require!(market.state == MarketState::MondayFinal, GapError::WrongState);
     require!(!market.swept, GapError::AlreadySwept);
-    // The settlement time is not stored; the deadline runs from the Monday target.
-    let deadline = (market.monday_target_ts_us / 1_000_000)
-        .checked_add(market.claim_deadline_s)
-        .ok_or(GapError::Overflow)?;
+    let deadline = market.settled_at.checked_add(market.claim_deadline_s).ok_or(GapError::Overflow)?;
     require!(Clock::get()?.unix_timestamp > deadline, GapError::TooEarly);
     require_usdc_account(&ctx.accounts.dealer_usdc, market, &market.dealer)?;
 
     let escrow = ctx.accounts.escrow.to_account_info();
+    // Sweep the raw token balance: whatever escrow holds after the claim window goes to the dealer.
     let amount = {
         let d = escrow.try_borrow_data()?;
         require!(d.len() >= 72, GapError::InvalidMint);

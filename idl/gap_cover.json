@@ -847,6 +847,10 @@
           {
             "name": "buying_closed",
             "type": "bool"
+          },
+          {
+            "name": "settled_at",
+            "type": "i64"
           }
         ]
       }

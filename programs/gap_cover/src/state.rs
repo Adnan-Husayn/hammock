@@ -92,6 +92,8 @@ pub struct Market {
     pub swept: bool,
     pub payout_per_contract: u64,
     pub buying_closed: bool,
+    /// Unix seconds when the market entered MondayFinal; the claim deadline runs from here.
+    pub settled_at: i64,
 }
 
 impl Market {

@@ -245,9 +245,9 @@ describe("sweep", () => {
     const b = await buy(c, 10, 120_000n);
     await settle(c, 19_600_000);
     const caller = await stranger(c);
-    await warpTo(c.h.context, MONDAY + 30 * DAY);
+    await warpTo(c.h.context, c.now + 30 * DAY);
     expectError(send(c, caller, await sweepIx(c, caller.publicKey)), "TooEarly");
-    await warpTo(c.h.context, MONDAY + 30 * DAY + 1);
+    await warpTo(c.h.context, c.now + 30 * DAY + 1);
     const before = bal(c, c.dealerUsdc);
     const r = send(c, caller, await sweepIx(c, caller.publicKey));
     expect(failed(r), logs(r)).toBe(false);
@@ -257,6 +257,21 @@ describe("sweep", () => {
     expectError(send(c, caller, await sweepIx(c, caller.publicKey)), "AlreadySwept");
     // a paying claim after the sweep fails with a clear error
     expectError(send(c, b.kp, await claimIx(c, b)), "AlreadySwept");
+  });
+
+  it("runs from settlement: a finalise 10 days late pushes the deadline out", async () => {
+    const c = await setup();
+    await buy(c, 10, 120_000n);
+    await sandboxPrice(c, "monday", 19_600_000);
+    await warpTo(c.h.context, MONDAY + 10 * DAY);
+    const settledAt = MONDAY + 10 * DAY;
+    const sub = await mintUsdc(c.h.context, c.usdc, c.demo.publicKey, 0n);
+    expect(failed(send(c, c.h.payer, await finaliseIx(c, c.h.payer.publicKey, sub)))).toBe(false);
+    expect(Number((await fetchMarket(c)).settledAt)).toBe(settledAt);
+    await warpTo(c.h.context, MONDAY + 31 * DAY);
+    expectError(send(c, c.h.payer, await sweepIx(c, c.h.payer.publicKey)), "TooEarly");
+    await warpTo(c.h.context, settledAt + 30 * DAY + 1);
+    expect(failed(send(c, c.h.payer, await sweepIx(c, c.h.payer.publicKey)))).toBe(false);
   });
 
   it("fails in Voided, even long after", async () => {
@@ -301,7 +316,7 @@ describe("close_market", () => {
     const c = await setup();
     await buy(c, 10, 120_000n);
     await settle(c, 19_600_000);
-    await warpTo(c.h.context, MONDAY + 30 * DAY + 1);
+    await warpTo(c.h.context, c.now + 30 * DAY + 1);
     expect(failed(send(c, c.h.payer, await sweepIx(c, c.h.payer.publicKey)))).toBe(false);
     const r = send(c, c.h.payer, await closeIx(c, c.h.payer.publicKey));
     expect(failed(r), logs(r)).toBe(false);
