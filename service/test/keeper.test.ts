@@ -105,18 +105,49 @@ describe("Keeper", () => {
     expect(s.chain.fins).toEqual([]);
     s.at(F + 420_000_000n);
     await s.keeper.tick("m");
+    expect(s.chain.fins).toEqual([]); // finalise.rs needs now > close
+    s.at(F + 420_000_001n);
+    await s.keeper.tick("m");
     expect(s.chain.fins).toEqual(["friday"]);
     await s.keeper.tick("m");
     expect(s.chain.fins).toEqual(["friday"]);
-    s.at(M + 420_000_000n);
+    s.at(M + 420_000_001n);
     await s.keeper.tick("m");
     expect(s.chain.fins).toEqual(["friday", "monday"]);
   });
 
   it("does not submit after the window has closed", async () => {
-    const s = setup(F + 420_000_000n);
+    const s = setup(F + 420_000_001n);
     s.archive.add(upd(F));
     await s.keeper.tick("m");
     expect(s.chain.submits).toEqual([]);
+  });
+
+  it("retries after a transient submit failure and does not blacklist the update", async () => {
+    const s = setup(F + 2_000_000n);
+    const u = upd(F);
+    s.archive.add(u);
+    let fail = true;
+    const orig = s.chain.submitReport.bind(s.chain);
+    s.chain.submitReport = async (m, l, x) => { if (fail) { fail = false; throw new Error("rpc down"); } return orig(m, l, x); };
+    await expect(s.keeper.tick("m")).rejects.toThrow("rpc down");
+    expect(s.keeper.isRejected(u.hash)).toBe(false);
+    await s.keeper.tick("m");
+    expect(s.chain.submits.map((x) => x.ts)).toEqual([F]);
+  });
+
+  it("one leg's finalise error does not stop the other leg", async () => {
+    const s = setup(M + 420_000_001n);
+    s.chain.finalise = async (_m, leg) => { s.chain.fins.push(leg); if (leg === "friday") throw new Error("boom"); s.chain.finalised[leg] = true; };
+    await expect(s.keeper.tick("m")).rejects.toThrow("boom");
+    expect(s.chain.fins).toEqual(["friday", "monday"]);
+  });
+
+  it("prunes archive entries outside the leg windows", async () => {
+    const s = setup(F + 2_000_000n);
+    s.archive.add(upd(F));
+    s.archive.add(upd(F + 100_000_000n));
+    await s.keeper.tick("m");
+    expect(s.archive.size).toBe(1);
   });
 });

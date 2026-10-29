@@ -50,6 +50,18 @@ export class Archive {
     return this.byHash.size;
   }
 
+  /** Drop entries outside every [T - halfWindow, T + halfWindow]; they can never be eligible for those legs. */
+  prune(targetsUs: bigint[], halfWindowUs: bigint): number {
+    let n = 0;
+    for (const [h, u] of this.byHash) {
+      if (!targetsUs.some((t) => (u.feedTsUs >= t ? u.feedTsUs - t : t - u.feedTsUs) <= halfWindowUs)) {
+        this.byHash.delete(h);
+        n++;
+      }
+    }
+    return n;
+  }
+
   /** Eligible updates, best first. Equal keys keep arrival order (stable sort), as the chain keeps the earlier. */
   eligible(targetUs: bigint, p: EligibilityParams): SignedUpdate[] {
     return [...this.byHash.values()]

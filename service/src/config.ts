@@ -7,7 +7,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const FEED_ID = 1314;
 export const EXPONENT = -5;
 export const ELIGIBILITY_HALF_WINDOW_US = 5_000_000n;
-// Provisional until Task 0 step 5 writes the measured caps here.
+// Provisional until Task 0 step 5 writes the measured caps here. Used when creating markets only: the
+// keeper and archive read caps and min publishers from the on-chain Market.
 export const CONF_CAP_BPS = { friday: 10, monday: 20 } as const;
 export const MIN_PUBLISHERS = 10;
 // Keeper timing (spec section 6): first submit at T + 2 s, finalise after T + 7 min.

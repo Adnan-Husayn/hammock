@@ -256,6 +256,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_live_postmarket_capture() {
+        let r = parse_report(&hex(include_str!("../tests/data/postmarket.hex")), 1314).unwrap();
+        assert_eq!(r.session, MarketSession::PostMarket);
+        assert_eq!(r.price, 21_043_004);
+        assert_eq!(r.exponent, -5);
+        assert_eq!(r.confidence, 3_496);
+        assert_eq!(r.publishers, 14);
+        assert_eq!(r.feed_update_ts_us, 1_793_307_911_600_000);
+    }
+
+    #[test]
     fn rejects_truncated_extended_and_missing_feed() {
         let m = regular();
         assert!(parse_report(&m[..m.len() - 1], 1314).is_err());

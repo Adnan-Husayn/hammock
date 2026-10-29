@@ -34,7 +34,19 @@ export function submitReportInstructions(
   return [createEd25519Instruction(message, 1, ENVELOPE_OFFSET), ix];
 }
 
-/** Send a submit_report transaction. Resolves true when confirmed, false when the program rejected it. */
+// Report-specific failures: the same bytes would fail again. Everything else (WrongState, WindowNotStarted,
+// balance, compute, RPC) is retried. A "not strictly better" report is a successful no-op, not an error.
+const REPORT_ERRORS = ["BadPayload", "WrongFeed", "WrongSession", "CarriedForward", "OutsideWindow", "ZeroPrice", "WrongExponent", "WideConfidence", "TooFewPublishers"];
+
+export function isReportRejection(logs: readonly string[]): boolean {
+  return logs.some(
+    (l) =>
+      REPORT_ERRORS.some((n) => l.includes(`Error Code: ${n}.`)) ||
+      l.startsWith(`Program ${LAZER_PROGRAM_ID} failed`), // Lazer signature / format verification failed
+  );
+}
+
+/** Send a submit_report transaction. Resolves true when confirmed, false when the report itself was rejected. */
 export async function sendSubmitReport(
   conn: Connection,
   programId: PublicKey,
@@ -53,8 +65,9 @@ export async function sendSubmitReport(
     const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
     return !res.value.err;
   } catch (e: any) {
-    // A simulation failure carries program logs: the program rejected this report. Anything else is transient.
-    if (Array.isArray(e?.logs) || Array.isArray(e?.transactionLogs)) return false;
+    // Only a report-specific rejection returns false; any other failure throws so the keeper retries.
+    const logs: string[] | undefined = Array.isArray(e?.logs) ? e.logs : Array.isArray(e?.transactionLogs) ? e.transactionLogs : undefined;
+    if (logs && isReportRejection(logs)) return false;
     throw e;
   }
 }

@@ -13,7 +13,7 @@ export type MarketView = {
 
 export interface Chain {
   readMarket(market: string): Promise<MarketView>;
-  /** Resolves true when accepted, false when the program rejected the report. */
+  /** Resolves true when accepted, false when the report itself was rejected (never retried). Throws on anything transient. */
   submitReport(market: string, leg: Leg, u: SignedUpdate): Promise<boolean>;
   finalise(market: string, leg: Leg): Promise<void>;
 }
@@ -36,15 +36,22 @@ export class Keeper {
   async tick(market: string): Promise<void> {
     const view = await this.chain.readMarket(market);
     const now = this.nowUs();
+    this.archive.prune([view.targetUs.friday, view.targetUs.monday], view.params.friday.halfWindowUs);
+    let firstError: unknown;
     for (const leg of ["friday", "monday"] as Leg[]) {
-      const t = view.targetUs[leg];
-      if (view.finalised[leg] || now < t + SUBMIT_START_US) continue;
-      if (now >= t + SUBMISSION_WINDOW_US) {
-        await this.chain.finalise(market, leg);
-        continue;
+      try {
+        const t = view.targetUs[leg];
+        if (view.finalised[leg] || now < t + SUBMIT_START_US) continue;
+        if (now > t + SUBMISSION_WINDOW_US) { // finalise.rs: now > close
+          await this.chain.finalise(market, leg);
+          continue;
+        }
+        await this.submitBest(market, leg, view);
+      } catch (e) {
+        firstError ??= e; // one leg's failure must not abort the other's pass
       }
-      await this.submitBest(market, leg, view);
     }
+    if (firstError !== undefined) throw firstError;
   }
 
   private async submitBest(market: string, leg: Leg, view: MarketView) {
