@@ -7,7 +7,13 @@ import { LiteSVM, Clock, FailedTransactionMetadata, TransactionMetadata } from "
 import { AnchorProvider, Program, Idl, Wallet } from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, VersionedTransaction } from "@solana/web3.js";
 import {
+  TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
+  MINT_SIZE,
+  ACCOUNT_SIZE,
+  createInitializeMint2Instruction,
+  createInitializeAccount3Instruction,
+  createMintToInstruction,
   ExtensionType,
   getMintLen,
   createInitializeMintInstruction,
@@ -91,7 +97,7 @@ export async function startHarness() {
   const fixtureUs = BigInt(JSON.parse(readFileSync(resolve(ROOT, "fixtures/pyth/regular-2026-10-29.json"), "utf8")).parsed.timestampUs);
   await warpTo(context, Number(fixtureUs / 1_000_000n));
 
-  return { context, provider, program, payer, usdcMint: null as PublicKey | null, clock: context.getClock() };
+  return { context, provider, program, payer, clock: context.getClock() };
 }
 
 export async function warpTo(context: LiteSVM, unixSeconds: number): Promise<void> {
@@ -142,4 +148,44 @@ export async function uiAmount(context: LiteSVM, mint: PublicKey, amount: bigint
   const r = sendTx(context, payerOf(context), [createAmountToUiAmountInstruction(mint, amount, TOKEN_2022_PROGRAM_ID)]);
   if (failed(r)) throw new Error(`AmountToUiAmount failed: ${r.toString()}`);
   return Buffer.from(r.returnData().data()).toString("utf8");
+}
+
+/** Plain SPL Token USDC test mint, 6 decimals, harness payer as mint authority. */
+export async function createUsdcMint(context: LiteSVM): Promise<PublicKey> {
+  const payer = payerOf(context);
+  const mint = Keypair.generate();
+  mustSend(
+    context,
+    payer,
+    [
+      SystemProgram.createAccount({ fromPubkey: payer.publicKey, newAccountPubkey: mint.publicKey, space: MINT_SIZE, lamports: Number(context.minimumBalanceForRentExemption(BigInt(MINT_SIZE))), programId: TOKEN_PROGRAM_ID }),
+      createInitializeMint2Instruction(mint.publicKey, 6, payer.publicKey, null, TOKEN_PROGRAM_ID),
+    ],
+    [mint],
+  );
+  return mint.publicKey;
+}
+
+/** New token account for `owner` on a USDC test mint, funded with `amount`. */
+export async function mintUsdc(context: LiteSVM, mint: PublicKey, owner: PublicKey, amount: bigint): Promise<PublicKey> {
+  const payer = payerOf(context);
+  const acct = Keypair.generate();
+  mustSend(
+    context,
+    payer,
+    [
+      SystemProgram.createAccount({ fromPubkey: payer.publicKey, newAccountPubkey: acct.publicKey, space: ACCOUNT_SIZE, lamports: Number(context.minimumBalanceForRentExemption(BigInt(ACCOUNT_SIZE))), programId: TOKEN_PROGRAM_ID }),
+      createInitializeAccount3Instruction(acct.publicKey, mint, owner, TOKEN_PROGRAM_ID),
+      createMintToInstruction(mint, acct.publicKey, payer.publicKey, amount, [], TOKEN_PROGRAM_ID),
+    ],
+    [acct],
+  );
+  return acct.publicKey;
+}
+
+/** Raw amount held by a token account (SPL Token or Token-2022). */
+export function tokenBalance(context: LiteSVM, account: PublicKey): bigint {
+  const a = context.getAccount(account);
+  if (!a) throw new Error(`no token account ${account.toBase58()}`);
+  return Buffer.from(a.data).readBigUInt64LE(64);
 }

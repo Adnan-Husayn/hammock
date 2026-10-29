@@ -21,6 +21,568 @@
       ],
       "accounts": [],
       "args": []
+    },
+    {
+      "name": "create_market",
+      "discriminator": [
+        103,
+        226,
+        97,
+        235,
+        200,
+        188,
+        251,
+        254
+      ],
+      "accounts": [
+        {
+          "name": "dealer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "nvdax_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "collateral_reserve",
+          "writable": true
+        },
+        {
+          "name": "bounty_reserve",
+          "writable": true
+        },
+        {
+          "name": "dealer_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "MarketParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "submit_report",
+      "discriminator": [
+        27,
+        178,
+        64,
+        9,
+        20,
+        46,
+        250,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "submitter",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "lazer_program"
+        },
+        {
+          "name": "lazer_storage"
+        },
+        {
+          "name": "lazer_treasury",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "leg",
+          "type": {
+            "defined": {
+              "name": "Leg"
+            }
+          }
+        },
+        {
+          "name": "signed_message",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "submit_sandbox_price",
+      "discriminator": [
+        91,
+        134,
+        94,
+        155,
+        48,
+        56,
+        142,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "demo_authority",
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "leg",
+          "type": {
+            "defined": {
+              "name": "Leg"
+            }
+          }
+        },
+        {
+          "name": "price",
+          "type": "i64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Market",
+      "discriminator": [
+        219,
+        190,
+        213,
+        55,
+        0,
+        227,
+        198,
+        154
+      ]
+    }
+  ],
+  "types": [
+    {
+      "name": "Leg",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Friday"
+          },
+          {
+            "name": "Monday"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Created"
+          },
+          {
+            "name": "FridayFinal"
+          },
+          {
+            "name": "MondayFinal"
+          },
+          {
+            "name": "Voided"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SandboxMode",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Gap"
+          },
+          {
+            "name": "MultiplierVoid"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Candidate",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "price",
+            "type": "i64"
+          },
+          {
+            "name": "feed_ts_us",
+            "type": "i64"
+          },
+          {
+            "name": "submitter",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "friday_target_ts",
+            "type": "i64"
+          },
+          {
+            "name": "monday_target_ts",
+            "type": "i64"
+          },
+          {
+            "name": "buying_close_ts",
+            "type": "i64"
+          },
+          {
+            "name": "band_lower_bps",
+            "type": "u16"
+          },
+          {
+            "name": "band_upper_bps",
+            "type": "u16"
+          },
+          {
+            "name": "friday_conf_cap_bps",
+            "type": "u16"
+          },
+          {
+            "name": "monday_conf_cap_bps",
+            "type": "u16"
+          },
+          {
+            "name": "min_publishers",
+            "type": "u16"
+          },
+          {
+            "name": "max_contracts",
+            "type": "u32"
+          },
+          {
+            "name": "bounty_per_leg",
+            "type": "u64"
+          },
+          {
+            "name": "dealer_quote_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "sandbox",
+            "type": "bool"
+          },
+          {
+            "name": "demo_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "sandbox_mode",
+            "type": {
+              "defined": {
+                "name": "SandboxMode"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Market",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "dealer",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "vault_bump",
+            "type": "u8"
+          },
+          {
+            "name": "feed_id",
+            "type": "u32"
+          },
+          {
+            "name": "exponent",
+            "type": "i16"
+          },
+          {
+            "name": "nvdax_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "usdc_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "collateral_reserve",
+            "type": "pubkey"
+          },
+          {
+            "name": "bounty_reserve",
+            "type": "pubkey"
+          },
+          {
+            "name": "friday_target_ts_us",
+            "type": "i64"
+          },
+          {
+            "name": "monday_target_ts_us",
+            "type": "i64"
+          },
+          {
+            "name": "buying_close_ts",
+            "type": "i64"
+          },
+          {
+            "name": "band_lower_bps",
+            "type": "u16"
+          },
+          {
+            "name": "band_upper_bps",
+            "type": "u16"
+          },
+          {
+            "name": "friday_conf_cap_bps",
+            "type": "u16"
+          },
+          {
+            "name": "monday_conf_cap_bps",
+            "type": "u16"
+          },
+          {
+            "name": "min_publishers",
+            "type": "u16"
+          },
+          {
+            "name": "eligibility_half_window_us",
+            "type": "i64"
+          },
+          {
+            "name": "submission_window_us",
+            "type": "i64"
+          },
+          {
+            "name": "max_contracts",
+            "type": "u32"
+          },
+          {
+            "name": "bounty_per_leg",
+            "type": "u64"
+          },
+          {
+            "name": "claim_deadline_s",
+            "type": "i64"
+          },
+          {
+            "name": "dealer_quote_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_max_lifetime_s",
+            "type": "i64"
+          },
+          {
+            "name": "sandbox",
+            "type": "bool"
+          },
+          {
+            "name": "demo_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "sandbox_mode",
+            "type": {
+              "defined": {
+                "name": "SandboxMode"
+              }
+            }
+          },
+          {
+            "name": "creation_multiplier_bits",
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "MarketState"
+              }
+            }
+          },
+          {
+            "name": "friday",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "Candidate"
+                }
+              }
+            }
+          },
+          {
+            "name": "monday",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "Candidate"
+                }
+              }
+            }
+          },
+          {
+            "name": "contracts_sold",
+            "type": "u32"
+          },
+          {
+            "name": "total_premiums",
+            "type": "u64"
+          },
+          {
+            "name": "open_positions",
+            "type": "u32"
+          },
+          {
+            "name": "swept",
+            "type": "bool"
+          },
+          {
+            "name": "payout_per_contract",
+            "type": "u64"
+          },
+          {
+            "name": "buying_closed",
+            "type": "bool"
+          }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    {
+      "code": 6100,
+      "name": "InvalidParams",
+      "msg": "Market parameters are not valid"
+    },
+    {
+      "code": 6101,
+      "name": "CreatedTooLate",
+      "msg": "Real markets must be created at least one hour before the Friday target"
+    },
+    {
+      "code": 6102,
+      "name": "WrongState",
+      "msg": "Market is not in the right state for this leg"
+    },
+    {
+      "code": 6103,
+      "name": "WindowNotStarted",
+      "msg": "The submission window for this leg has not started"
+    },
+    {
+      "code": 6104,
+      "name": "WindowClosed",
+      "msg": "The submission window for this leg has closed"
+    },
+    {
+      "code": 6105,
+      "name": "WrongInstructionLayout",
+      "msg": "Transaction must carry the Ed25519 instruction at index 0 over this instruction's message"
+    },
+    {
+      "code": 6106,
+      "name": "SandboxMarket",
+      "msg": "Sandbox markets take prices from the demo authority only"
+    },
+    {
+      "code": 6107,
+      "name": "NotSandbox",
+      "msg": "Only sandbox markets take a price from the demo authority"
+    },
+    {
+      "code": 6108,
+      "name": "WrongAuthority",
+      "msg": "Signer is not the market's demo authority"
+    },
+    {
+      "code": 6109,
+      "name": "BadPrice",
+      "msg": "Price must be positive"
+    },
+    {
+      "code": 6110,
+      "name": "InvalidMint",
+      "msg": "Mint or token account is not valid for this market"
+    },
+    {
+      "code": 6111,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
     }
   ]
 }

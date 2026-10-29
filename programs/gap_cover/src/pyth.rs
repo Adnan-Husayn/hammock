@@ -217,6 +217,7 @@ mod tests {
             friday_conf_cap_bps: 10,
             monday_conf_cap_bps: 10,
             min_publishers: 5,
+            ..Default::default()
         }
     }
     fn report() -> PriceReport {
