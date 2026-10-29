@@ -44,4 +44,12 @@ pub enum GapError {
     OverCapacity,
     #[msg("Buying has closed for this market")]
     BuyingClosed,
+    #[msg("Position is already closed")]
+    PositionClosed,
+    #[msg("The claim deadline has not passed")]
+    TooEarly,
+    #[msg("Escrow has already been swept to the dealer")]
+    AlreadySwept,
+    #[msg("Market cannot be closed yet")]
+    CannotClose,
 }

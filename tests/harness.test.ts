@@ -42,7 +42,7 @@ describe("harness", () => {
   it("harness boots under the current Node", async () => {
     const h = await startHarness();
     expect(h.program.programId).toBeInstanceOf(PublicKey);
-    await h.program.methods.ping().rpc();
+    expect(h.context.getAccount(h.program.programId)?.executable).toBe(true);
     expect(h.context.getAccount(LAZER_PROGRAM_ID)?.executable).toBe(true);
     expect(h.context.getBalance(LAZER_TREASURY)).toBe(BigInt(TREASURY_LAMPORTS));
   });

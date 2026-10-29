@@ -20,11 +20,6 @@ use state::Leg;
 pub mod gap_cover {
     use super::*;
 
-    pub fn ping(_ctx: Context<Ping>) -> Result<()> {
-        msg!("gap_cover ping");
-        Ok(())
-    }
-
     pub fn create_market(ctx: Context<CreateMarket>, params: MarketParams) -> Result<()> {
         instructions::create_market::create_market(ctx, params)
     }
@@ -48,7 +43,20 @@ pub mod gap_cover {
     pub fn buy(ctx: Context<Buy>) -> Result<()> {
         instructions::buy::buy(ctx)
     }
-}
 
-#[derive(Accounts)]
-pub struct Ping {}
+    pub fn claim(ctx: Context<Claim>) -> Result<()> {
+        instructions::settle_out::claim(ctx)
+    }
+
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        instructions::settle_out::refund(ctx)
+    }
+
+    pub fn sweep(ctx: Context<Sweep>) -> Result<()> {
+        instructions::settle_out::sweep(ctx)
+    }
+
+    pub fn close_market(ctx: Context<CloseMarket>) -> Result<()> {
+        instructions::settle_out::close_market(ctx)
+    }
+}

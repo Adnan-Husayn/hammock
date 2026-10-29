@@ -8,21 +8,6 @@
   },
   "instructions": [
     {
-      "name": "ping",
-      "discriminator": [
-        173,
-        0,
-        94,
-        236,
-        73,
-        133,
-        225,
-        153
-      ],
-      "accounts": [],
-      "args": []
-    },
-    {
       "name": "create_market",
       "discriminator": [
         103,
@@ -347,6 +332,167 @@
         {
           "name": "instructions_sysvar",
           "address": "Sysvar1nstructions1111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim",
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "owner_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund",
+      "discriminator": [
+        2,
+        96,
+        183,
+        251,
+        63,
+        208,
+        46,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "owner_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "sweep",
+      "discriminator": [
+        40,
+        23,
+        234,
+        175,
+        14,
+        61,
+        154,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "dealer_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_market",
+      "discriminator": [
+        88,
+        154,
+        248,
+        186,
+        48,
+        14,
+        123,
+        244
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "dealer",
+          "writable": true
         }
       ],
       "args": []
@@ -835,6 +981,26 @@
       "code": 6120,
       "name": "BuyingClosed",
       "msg": "Buying has closed for this market"
+    },
+    {
+      "code": 6121,
+      "name": "PositionClosed",
+      "msg": "Position is already closed"
+    },
+    {
+      "code": 6122,
+      "name": "TooEarly",
+      "msg": "The claim deadline has not passed"
+    },
+    {
+      "code": 6123,
+      "name": "AlreadySwept",
+      "msg": "Escrow has already been swept to the dealer"
+    },
+    {
+      "code": 6124,
+      "name": "CannotClose",
+      "msg": "Market cannot be closed yet"
     }
   ]
 }
