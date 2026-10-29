@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction,
 } from "@solana/web3.js";
-import { checkRelay, relay, RELAYABLE, RelayRefused, type RelayContext } from "../src/relay.ts";
+import { readFileSync } from "node:fs";
+import { BorshAccountsCoder, BN } from "@coral-xyz/anchor";
+import { checkRelay, relay, RELAYABLE, RelayRefused, sandboxMarketCheck, type RelayContext } from "../src/relay.ts";
+import { serviceServer, RELAY_MIN_LAMPORTS, RELAY_PER_MINUTE_IP, RELAY_PER_MINUTE_USER, FAUCET_PER_MINUTE } from "../src/server.ts";
 import { signQuote } from "../src/quote.ts";
 
 const programId = Keypair.generate().publicKey;
@@ -54,7 +57,7 @@ describe("relay accepts", () => {
     expect((await checkRelay(raw([ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }), gapIx("refund")]), ctx)).kind).toBe("refund");
   });
   it("partially signs as fee payer and leaves the user signature for the wallet", async () => {
-    const out = Transaction.from(await relay(raw([gapIx("claim")]), ctx, payer));
+    const out = Transaction.from((await relay(raw([gapIx("claim")]), ctx, payer)).transaction);
     const sigs = out.signatures;
     expect(sigs[0].publicKey.equals(payer.publicKey) && sigs[0].signature !== null).toBe(true);
     expect(sigs[1].publicKey.equals(user.publicKey) && sigs[1].signature === null).toBe(true);
@@ -110,5 +113,83 @@ describe("relay refuses", () => {
     const v0 = Buffer.from(legacy);
     v0[1 + 64 * 2] |= 0x80;
     await expect(checkRelay(v0, ctx)).rejects.toThrow(/legacy/);
+  });
+});
+
+/* ---------- chain-backed sandbox check ---------- */
+
+const idl = JSON.parse(readFileSync(new URL("../../idl/gap_cover.json", import.meta.url), "utf8"));
+async function sandboxMarketBytes() {
+  const k = PublicKey.default;
+  const bn = (n: number) => new BN(n);
+  return new BorshAccountsCoder(idl).encode("Market", {
+    dealer: k, bump: 0, vault_bump: 0, feed_id: 1314, exponent: -5, nvdax_mint: k, usdc_mint: k, token_program: k, escrow: k,
+    collateral_reserve: k, bounty_reserve: k, friday_target_ts_us: bn(0), monday_target_ts_us: bn(0), buying_close_ts: bn(0),
+    band_lower_bps: 100, band_upper_bps: 500, friday_conf_cap_bps: 10, monday_conf_cap_bps: 20, min_publishers: 10,
+    eligibility_half_window_us: bn(0), submission_window_us: bn(0), max_contracts: 200, bounty_per_leg: bn(0), claim_deadline_s: bn(0),
+    dealer_quote_key: k, quote_max_lifetime_s: bn(90), sandbox: true, demo_authority: k, sandbox_mode: { Gap: {} },
+    creation_multiplier_bits: bn(0), created_at: bn(0), state: { FridayFinal: {} }, friday: null, monday: null, contracts_sold: 0,
+    total_premiums: bn(0), open_positions: 0, swept: false, payout_per_contract: bn(0), buying_closed: false, settled_at: bn(0),
+  });
+}
+
+describe("relay sandbox check reads chain state", () => {
+  it("accepts a gap_cover-owned sandbox market and refuses a look-alike owned by another program", async () => {
+    const data = await sandboxMarketBytes();
+    const fake = Keypair.generate().publicKey;
+    const conn = {
+      getAccountInfo: async (k: PublicKey) =>
+        ({ data, owner: k.equals(sandboxMarket) ? programId : fake, lamports: 1, executable: false }) as any,
+    };
+    const chainCtx: RelayContext = { programId, feePayer: payer.publicKey, isSandboxMarket: sandboxMarketCheck(conn, programId) };
+    expect((await checkRelay(raw([gapIx("claim")]), chainCtx)).kind).toBe("claim");
+    const lookAlike = Keypair.generate().publicKey;
+    await expect(checkRelay(raw([gapIx("claim", { market: lookAlike })]), chainCtx)).rejects.toThrow(/sandbox markets only/);
+  });
+});
+
+/* ---------- HTTP limits ---------- */
+
+async function withServer(o: { balance?: number; user?: () => PublicKey }, fn: (u: string) => Promise<void>) {
+  let t = 0;
+  const s = serviceServer({
+    quoter: {} as any, sandbox: {} as any, relayPayer: payer.publicKey,
+    relay: async () => ({ transaction: Buffer.from("ok"), user: o.user ? o.user() : user.publicKey }),
+    faucet: async () => "sig",
+    relayBalance: async () => o.balance ?? RELAY_MIN_LAMPORTS,
+    nowMs: () => t,
+  });
+  await new Promise<void>((r) => s.listen(0, "127.0.0.1", () => r()));
+  try {
+    await fn(`http://127.0.0.1:${(s.address() as any).port}`);
+  } finally {
+    s.close();
+  }
+}
+const post = (u: string, path: string, b: unknown) => fetch(u + path, { method: "POST", body: JSON.stringify(b) }).then((r) => r.status);
+
+describe("HTTP limits", () => {
+  it("relay refuses below the SOL balance floor", async () => {
+    await withServer({ balance: RELAY_MIN_LAMPORTS - 1 }, async (u) => {
+      expect(await post(u, "/relay", { transaction: "AA==" })).toBe(503);
+    });
+  });
+  it("relay limits each wallet per minute", async () => {
+    await withServer({}, async (u) => {
+      for (let i = 0; i < RELAY_PER_MINUTE_USER; i++) expect(await post(u, "/relay", { transaction: "AA==" })).toBe(200);
+      expect(await post(u, "/relay", { transaction: "AA==" })).toBe(429);
+    });
+  });
+  it("relay limits each IP per minute across wallets", async () => {
+    await withServer({ user: () => Keypair.generate().publicKey }, async (u) => {
+      for (let i = 0; i < RELAY_PER_MINUTE_IP; i++) expect(await post(u, "/relay", { transaction: "AA==" })).toBe(200);
+      expect(await post(u, "/relay", { transaction: "AA==" })).toBe(429);
+    });
+  });
+  it("faucet has a global per-minute cap", async () => {
+    await withServer({}, async (u) => {
+      for (let i = 0; i < FAUCET_PER_MINUTE; i++) expect(await post(u, "/faucet", { wallet: Keypair.generate().publicKey.toBase58() })).toBe(200);
+      expect(await post(u, "/faucet", { wallet: Keypair.generate().publicKey.toBase58() })).toBe(429);
+    });
   });
 });

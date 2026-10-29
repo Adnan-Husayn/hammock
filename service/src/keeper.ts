@@ -22,11 +22,16 @@ export class Keeper {
   private rejected = new Set<string>();
   private submitted = new Map<string, bigint>(); // `${market}:${leg}` -> best feedTs we got accepted
 
-  constructor(
-    private archive: Archive,
-    private chain: Chain,
-    private nowUs: () => bigint,
-  ) {}
+  private archive: Archive;
+  private chain: Chain;
+  private nowUs: () => bigint;
+
+  // Explicit fields rather than parameter properties so `node --experimental-strip-types` can load this file.
+  constructor(archive: Archive, chain: Chain, nowUs: () => bigint) {
+    this.archive = archive;
+    this.chain = chain;
+    this.nowUs = nowUs;
+  }
 
   isRejected(hash: string) {
     return this.rejected.has(hash);

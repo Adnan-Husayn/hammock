@@ -136,9 +136,10 @@ export function decodeLastNonce(data: Buffer | null | undefined): bigint {
 export const positionPda = (programId: PublicKey, market: PublicKey, buyer: PublicKey) =>
   PublicKey.findProgramAddressSync([Buffer.from("position"), market.toBuffer(), buyer.toBuffer()], programId)[0];
 
-export async function readMarket(conn: Connection, market: PublicKey): Promise<MarketInfo | null> {
+/** Reads a Market only when gap_cover owns the account; a look-alike owned by another program reads as null. */
+export async function readMarket(conn: Pick<Connection, "getAccountInfo">, programId: PublicKey, market: PublicKey): Promise<MarketInfo | null> {
   const a = await conn.getAccountInfo(market, "confirmed");
-  return a ? decodeMarket(a.data) : null;
+  return a && a.owner.equals(programId) ? decodeMarket(a.data) : null;
 }
 
 export async function readLastNonce(conn: Connection, programId: PublicKey, market: PublicKey, buyer: PublicKey): Promise<bigint> {

@@ -64,3 +64,10 @@ relay key and which contains exactly one `gap_cover` instruction: `buy` (index 1
 index 0), `claim` or `refund`, on a sandbox market. The only other instruction allowed is one
 `SetComputeUnitLimit` of at most 400_000. The relay key may not appear in any instruction, and the only signers are
 the relay key and the user.
+The relay also limits requests per IP (20 a minute) and per wallet (10 a minute) and stops co-signing when the relay
+key holds less than 0.05 SOL. The faucet allows one drip per wallet every 10 minutes and 10 drips a minute overall.
+The service only treats an account as a market when the gap_cover program owns it.
+
+**Sandbox multiplier-void demo.** In this mode the service changes the test mint's multiplier when the judge rings
+the Monday bell, after buying has closed, rather than right after the first sale. It then submits a Monday price
+equal to the Friday price, and `finalise_monday` voids the market so buyers can claim refunds.

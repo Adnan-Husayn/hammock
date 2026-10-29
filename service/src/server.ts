@@ -7,20 +7,42 @@ import { loadConfig } from "./config.ts";
 import { nvdaxReference } from "./jupiter.ts";
 import { Freeze, loadGaps } from "./pricing.ts";
 import { Quoter, readLastNonce, readMarket, type QuoteResult } from "./quote.ts";
-import { RelayRefused, relay, type RelayContext } from "./relay.ts";
+import { RelayRefused, relay, sandboxMarketCheck, type RelayContext } from "./relay.ts";
 import { Sandbox, devnetSandboxChain, faucet, type DevnetSetup, type SandboxMode } from "./sandbox.ts";
 
 export type ServiceDeps = {
   quoter: Pick<Quoter, "quote">;
   sandbox: Pick<Sandbox, "start" | "bell">;
-  relay(raw: Buffer): Promise<Buffer>;
+  relay(raw: Buffer): Promise<{ transaction: Buffer; user: PublicKey }>;
   faucet(wallet: PublicKey): Promise<string>;
   relayPayer: PublicKey;
+  /** Relay key balance in lamports; the relay stops co-signing below RELAY_MIN_LAMPORTS. */
+  relayBalance(): Promise<number>;
   nowMs?: () => number;
 };
 
 const MAX_BODY = 16 * 1024;
 export const FAUCET_COOLDOWN_MS = 10 * 60_000;
+export const FAUCET_PER_MINUTE = 10; // all wallets together
+export const RELAY_PER_MINUTE_IP = 20;
+export const RELAY_PER_MINUTE_USER = 10;
+export const RELAY_MIN_LAMPORTS = 50_000_000; // 0.05 SOL floor
+
+/** Fixed one-minute window counter. */
+export class RateLimit {
+  private hits = new Map<string, number[]>();
+  private limit: number;
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+  take(key: string, nowMs: number): boolean {
+    const h = (this.hits.get(key) ?? []).filter((t) => nowMs - t < 60_000);
+    if (h.length >= this.limit) return (this.hits.set(key, h), false);
+    h.push(nowMs);
+    this.hits.set(key, h);
+    return true;
+  }
+}
 
 class HttpError extends Error {
   status: number;
@@ -76,6 +98,9 @@ function quoteJson(r: Extract<QuoteResult, { ok: true }>) {
 export function serviceServer(d: ServiceDeps): Server {
   const now = d.nowMs ?? Date.now;
   const lastFaucet = new Map<string, number>();
+  const faucetAll = new RateLimit(FAUCET_PER_MINUTE);
+  const relayIp = new RateLimit(RELAY_PER_MINUTE_IP);
+  const relayUser = new RateLimit(RELAY_PER_MINUTE_USER);
   return createServer(async (req, res: ServerResponse) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "content-type");
@@ -111,14 +136,18 @@ export function serviceServer(d: ServiceDeps): Server {
         case "POST /relay": {
           const { transaction } = await body(req);
           if (typeof transaction !== "string") throw new HttpError(400, "transaction must be base64");
+          if (!relayIp.take(req.socket.remoteAddress ?? "?", now())) throw new HttpError(429, "too many relay requests, try again in a minute");
+          if ((await d.relayBalance()) < RELAY_MIN_LAMPORTS) throw new HttpError(503, "relay is out of fee funds");
           const out = await d.relay(Buffer.from(transaction, "base64"));
-          return send(200, { transaction: out.toString("base64") });
+          if (!relayUser.take(out.user.toBase58(), now())) throw new HttpError(429, "too many relay requests for this wallet, try again in a minute");
+          return send(200, { transaction: out.transaction.toString("base64") });
         }
         case "POST /faucet": {
           const wallet = pubkey((await body(req)).wallet, "wallet");
           const k = wallet.toBase58();
           const t = now();
           if (t - (lastFaucet.get(k) ?? -Infinity) < FAUCET_COOLDOWN_MS) throw new HttpError(429, "faucet already used for this wallet, try again later");
+          if (!faucetAll.take("all", t)) throw new HttpError(429, "faucet is busy, try again in a minute");
           lastFaucet.set(k, t);
           try {
             return send(200, { signature: await d.faucet(wallet) });
@@ -193,7 +222,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
     freeze.update(ref, Date.now());
     for (const m of realMarkets) {
       if (refs.get(m) !== undefined || !ref) continue;
-      const mk = await readMarket(conn, m).catch(() => null);
+      const mk = await readMarket(conn, programId, m).catch(() => null);
       if (mk?.state === "FridayFinal") refs.set(m, ref.price);
     }
   };
@@ -209,7 +238,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
     recordFridayRef: (m, p) => refs.set(m, p),
   });
   const quoter = new Quoter({
-    readMarket: (m) => readMarket(conn, m),
+    readMarket: (m) => readMarket(conn, programId, m),
     readLastNonce: (m, b) => readLastNonce(conn, programId, m, b),
     freeze,
     fridayRef: (m) => refs.get(m),
@@ -221,7 +250,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
   const relayCtx: RelayContext = {
     programId,
     feePayer: feePayer.publicKey,
-    isSandboxMarket: async (m) => (await readMarket(conn, m).catch(() => null))?.sandbox === true,
+    isSandboxMarket: sandboxMarketCheck(conn, programId),
   };
   const server = serviceServer({
     quoter,
@@ -229,6 +258,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
     relay: (raw) => relay(raw, relayCtx, feePayer),
     faucet: (w) => faucet(setup, w),
     relayPayer: feePayer.publicKey,
+    relayBalance: () => conn.getBalance(feePayer.publicKey, "confirmed"),
   });
   server.listen(cfg.httpPort, () => console.log(`dealer service on :${cfg.httpPort}`));
   return server;

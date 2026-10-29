@@ -1,5 +1,6 @@
 import { ComputeBudgetProgram, Ed25519Program, PublicKey, Transaction, type Keypair } from "@solana/web3.js";
-import { INLINE_MSG, INLINE_PK, INLINE_SIG, QUOTE_LEN } from "./quote.ts";
+import { INLINE_MSG, INLINE_PK, INLINE_SIG, QUOTE_LEN, readMarket } from "./quote.ts";
+import type { Connection } from "@solana/web3.js";
 
 /**
  * Fee-payer relay for sandbox judge flows (spec section 11). The service pays fees only for a transaction it fully
@@ -105,10 +106,15 @@ export async function checkRelay(raw: Buffer, ctx: RelayContext): Promise<{ tx: 
   return { tx, kind, user, market };
 }
 
+/** Sandbox check backed by chain state: the account must be owned by gap_cover and decode as a sandbox Market. */
+export function sandboxMarketCheck(conn: Pick<Connection, "getAccountInfo">, programId: PublicKey) {
+  return async (market: PublicKey) => (await readMarket(conn, programId, market).catch(() => null))?.sandbox === true;
+}
+
 /** Checks, then partially signs as fee payer. The user's wallet adds its signature and sends. */
-export async function relay(raw: Buffer, ctx: RelayContext, feePayer: Keypair): Promise<Buffer> {
+export async function relay(raw: Buffer, ctx: RelayContext, feePayer: Keypair): Promise<{ transaction: Buffer; user: PublicKey }> {
   if (!feePayer.publicKey.equals(ctx.feePayer)) throw new Error("relay key mismatch");
-  const { tx } = await checkRelay(raw, ctx);
+  const { tx, user } = await checkRelay(raw, ctx);
   tx.partialSign(feePayer);
-  return tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+  return { transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }), user };
 }
