@@ -180,6 +180,62 @@
           "type": "i64"
         }
       ]
+    },
+    {
+      "name": "finalise_friday",
+      "discriminator": [
+        74,
+        5,
+        224,
+        57,
+        250,
+        188,
+        201,
+        95
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "nvdax_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "collateral_reserve",
+          "writable": true
+        },
+        {
+          "name": "bounty_reserve",
+          "writable": true
+        },
+        {
+          "name": "submitter_usdc",
+          "writable": true
+        },
+        {
+          "name": "dealer_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
     }
   ],
   "accounts": [
@@ -583,6 +639,11 @@
       "code": 6111,
       "name": "Overflow",
       "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6112,
+      "name": "WindowOpen",
+      "msg": "The submission window for this leg is still running"
     }
   ]
 }

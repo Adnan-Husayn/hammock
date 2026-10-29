@@ -26,4 +26,6 @@ pub enum GapError {
     InvalidMint,
     #[msg("Arithmetic overflow")]
     Overflow,
+    #[msg("The submission window for this leg is still running")]
+    WindowOpen,
 }

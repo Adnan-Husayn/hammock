@@ -3,3 +3,5 @@ pub mod submit_report;
 
 pub use create_market::*;
 pub use submit_report::*;
+pub mod finalise;
+pub use finalise::*;
