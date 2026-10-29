@@ -2,11 +2,19 @@
   "name": "gap-cover-service",
   "private": true,
   "type": "module",
-  "scripts": { "test": "vitest run", "start": "node --experimental-strip-types src/main.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "start": "node --experimental-strip-types src/server.ts"
+  },
   "dependencies": {
     "@pythnetwork/pyth-lazer-solana-sdk": "^0.2.2",
     "@solana/web3.js": "^1.99.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "@solana/spl-token": "^0.4.15"
   },
-  "devDependencies": { "typescript": "^5.9.3", "vitest": "^5.0.5" }
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5",
+    "@coral-xyz/anchor": "0.30.1"
+  }
 }

@@ -42,3 +42,25 @@ Anchor 0.30.1 with the Solana platform tools (cargo 1.84) needs some lockfile pi
 `anchor build` compiles the program but its IDL step fails on current host toolchains
 (anchor-syn 0.30.1 and proc-macro2 / ark-ff-macros incompatibilities). The IDL is therefore
 kept by hand in `idl/gap_cover.json`; update it whenever an instruction changes.
+
+## Dealer service
+
+`service/src/server.ts` serves quotes, sandbox markets, the sandbox fee-payer relay and the devnet faucet:
+`GET /quote?market&buyer&contracts`, `POST /sandbox/start {mode}`, `POST /sandbox/bell {market}`, `GET /relay`,
+`POST /relay {transaction}`, `POST /faucet {wallet}`. Keys load from file paths in `DEALER_KEYPAIR`,
+`DEMO_AUTHORITY_KEYPAIR`, `RELAY_KEYPAIR` (a separate key holding only SOL for fees) and optionally `QUOTE_KEYPAIR`.
+They are never logged or returned.
+
+The program enforces the dealer's signature on a quote, not the pricing model. Every quote response carries the
+formula inputs (NVDAx reference, Friday reference, `m`, base, uncertainty, utilisation, reserve) so the app can
+show them.
+
+**Historical gaps.** `service/data/nvda-gaps.csv` holds the last 104 NVDA weekends, built by
+`node scripts/build-gaps.mjs` from free daily bars. They are a proxy: Friday regular close to Monday regular open,
+not the 15:59:30 ET Friday and 09:31:30 ET Monday marks the program settles on.
+
+**Relay rules.** The relay co-signs only a legacy transaction with at most 3 instructions whose fee payer is the
+relay key and which contains exactly one `gap_cover` instruction: `buy` (index 1, with its inline Ed25519 quote at
+index 0), `claim` or `refund`, on a sandbox market. The only other instruction allowed is one
+`SetComputeUnitLimit` of at most 400_000. The relay key may not appear in any instruction, and the only signers are
+the relay key and the user.
