@@ -6,266 +6,255 @@
 
 **Architecture:** An Anchor program holds all money and enforces every settlement and quote rule on-chain. One Node service streams Pyth, prices and signs quotes, runs the keeper and the sandbox demo authority. A React app is the only user surface.
 
-**Tech Stack:** Rust + Anchor 0.30.1 (installed), `pyth-lazer-solana-contract` 0.11 for the verifier CPI, TypeScript + Node 25, `solana-bankrun` 0.4 / `anchor-bankrun` 0.5 + vitest for program tests, `ws` + Jupiter lite-api in the service, React + Vite for the app.
+**Tech Stack:** Rust + Anchor 0.30.1 (installed), no Pyth crates: a raw CPI to the Lazer verifier and an in-house payload parser (the published `pyth-lazer-solana-contract` 0.11 requires anchor-lang ^1.2.1 and solana-program ^4, checked on crates.io 30 Oct 2026). TypeScript on Node 25 (fallback Node 22), `solana-bankrun` 0.4 / `anchor-bankrun` 0.5 + vitest for program tests (fallback `litesvm`), `ws` + Jupiter lite-api in the service, React + Vite for the app.
 
-**Spec:** `docs/superpowers/specs/2026-10-30-monday-gap-cover-design.md` (v3.1). Section numbers below (§) refer to it.
+**Spec:** `docs/superpowers/specs/2026-10-30-monday-gap-cover-design.md` (v3.2). Section numbers below (§) refer to it.
 
 ## Global Constraints
 
-- Program feed id 1314, exponent -5, band 100 to 500 bps, eligibility half-window 5 s, submission window 7 min (sandbox 5 s), bounty 100_000 per leg, quote lifetime 90 s, claim deadline 30 days (§6).
+- Feed id 1314, exponent -5, band 100 to 500 bps, eligibility half-window 5 s, submission window 7 min, bounty 100_000 per leg, quote lifetime 90 s, claim deadline 30 days (§6).
 - All program arithmetic is checked i128; intermediates may be negative; overflow or a negative transfer fails (§9).
 - Confidence check is `confidence * 10_000 <= price * conf_cap_bps`, never a division (§5).
-- Ed25519 instruction at transaction index 0, program instruction at index 1, for both `submit_report` and `buy` (§5, §10).
+- Ed25519 instruction at transaction index 0, program instruction at index 1, and the Ed25519 offsets header checked, for both `submit_report` and `buy` (§5, §10).
+- Report replacement is strict on `(abs(feed_ts - T), feed_ts)`; exact ties keep the earlier submission (§5).
 - `buy` takes no amount arguments; contracts and premium come only from the signed quote (§7).
-- No user-facing text contains the word "open" for the settlement; names are "Friday afternoon mark" and "Monday morning mark" (§2).
-- Devnet only; no mainnet deployment; the Pyth Pro key and dealer keys never reach the browser (§11).
+- Lazer verifier: program `pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt`, instruction `verify_message(message_data: bytes, ed25519_instruction_index: u16 = 0, signature_index: u8 = 0)`, accounts `payer, storage (3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL), treasury (opsLibxVY7Vz5eYMmSfX8cLFCFVYTtH6fr6MiifMpA7 on devnet; read it from storage), system_program, instructions_sysvar`.
+- No user-facing text contains the word "open" anywhere; use "Friday afternoon mark", "Monday morning mark", "buying", "active positions" (§2).
+- Devnet only. The Pyth Pro key and dealer keys never reach the browser (§11).
 - Commits carry no AI attribution trailers (owner's standing preference for public repos).
-- Repository layout: `programs/gap_cover/` (Rust), `tests/` (bankrun), `service/` (Node), `app/` (React), `scripts/` (deploy and one-off tools), `fixtures/` (signed Pyth payloads).
+- Layout: `programs/gap_cover/`, `tests/`, `service/`, `app/`, `scripts/`, `fixtures/`, `data/`.
 
 ## Review Focus
 
-1. A judge opens the app when no real market is buying (weekday, or after Sunday 17:50 ET): the app must still show the market state and offer the sandbox, never a blank or error screen. Test in Task 11.
-2. The same buyer requests quotes from two tabs: both quotes carry the same nonce, the first buy succeeds and the second fails cleanly with "quote already used", never a double charge. Test in Task 6.
-3. Pyth delivers duplicate or out-of-order updates across the three endpoints: the archive stores each payload once and the keeper still submits the closest one. Test in Task 8.
-4. A buyer's wallet lacks enough USDC for the premium: the app says so before asking for a signature. Test in Task 11.
-5. A Monday mark exactly at a band edge (gap of exactly 100 or 500 bps, or 1 bp beyond): payout is exactly 0 or exactly 1_000_000, and escrow never goes short through rounding. Test in Task 2.
+1. A judge opens the app when no real market is buying: the app still shows the market state and offers the sandbox. Test in Task 13.
+2. The same buyer requests quotes from two tabs: both carry the same nonce; the first buy succeeds and the second fails with `QuoteUsed`, never a double charge. Test in Task 6.
+3. Pyth delivers duplicate, out-of-order or ineligible updates: the keeper submits only eligible updates, closest first, and never resubmits one the program rejected. Test in Task 9.
+4. A buyer lacks USDC for the premium: the app says so before asking for a signature. Test in Task 13.
+5. A Monday mark exactly at a band edge (100 or 500 bps, or 1 bp past): payout is exactly 0, 2_500 or 1_000_000, and escrow never goes short through rounding. Test in Task 2.
+
+## If time runs short, cut in this order
+
+1. Task 0 Step 5 (keep provisional caps). 2. The 20 to 23 November rehearsal weekend. 3. Task 10 calibration (keep coefficients). 4. Three-endpoint streaming in Task 9 (one endpoint with failover). 5. Proof-screen escrow detail in Task 13.
+
+Never cut: the Lazer verification path, quote-nonce tests, multiplier-void tests, payout/refund tests, the sandbox cycle, the proof screen's price/session/timestamp.
 
 ---
 
-### Task 0: Mark-time measurement logger (start first; it needs five weekdays)
+### Task 0: Mark-time logger (start now; independent of the build week)
 
-**Files:**
-- Create: `scripts/measure-marks.mjs`, `scripts/README-measure.md`
-- Uses `PYTH_PRO_TOKEN` from `.env` (never committed; `.gitignore` already covers `.env*`)
+**Files:** Create `scripts/measure-marks.mjs`, `scripts/com.monday-gap-cover.measure.plist`, `scripts/README-measure.md`, `.gitignore` (`.env*`, `node_modules/`, `target/`, `.anchor/`, `data/*.csv` excluded from git except `data/marks.csv`).
 
-**Interfaces:**
-- Produces: `data/marks.csv` with columns `date,leg,target_utc,updates,session,conf_bps_p50,conf_bps_p95,conf_bps_max,publishers_min,publishers_p50,fresh_share`
+**Interfaces:** Produces `data/marks.csv`: `date,leg,target_utc,updates,session,conf_bps_p50,conf_bps_p95,conf_bps_max,publishers_min,publishers_p50,fresh_share`.
 
-- [ ] **Step 1:** Write `measure-marks.mjs`: connect to feed 1314 (properties `price, exponent, confidence, publisherCount, marketSession, feedUpdateTimestamp`, `fixed_rate@200ms`, JSON delivery) from T - 30 s to T + 30 s for T = 15:59:30 ET and 09:31:30 ET of the current day, and append one row per leg. Reuse the subscription shape from `../gapcover-spike/smoke2.mjs`.
-- [ ] **Step 2:** Run once by hand against the next mark and check a row appears with `session` = `regular` and `fresh_share` = 1.
-- [ ] **Step 3:** Schedule it on weekdays at 09:30 and 15:58 ET (launchd plist in `scripts/`, documented in `README-measure.md`).
+- [ ] **Step 1:** Create `.gitignore` first, then `measure-marks.mjs`: subscribe to feed 1314 (properties `price, exponent, confidence, publisherCount, marketSession, feedUpdateTimestamp`, `fixed_rate@200ms`, JSON delivery, `PYTH_PRO_TOKEN` from `.env`) from T - 30 s to T + 30 s for T = 15:59:30 ET and 09:31:30 ET, appending one row per leg. Reuse the subscription in `../gapcover-spike/smoke2.mjs`.
+- [ ] **Step 2:** Run by hand at the next mark; check a row with `session = regular` and `fresh_share = 1`.
+- [ ] **Step 3:** Install the launchd job for weekdays at 09:30 and 15:58 ET (the Mac's clock zone is IST, so the plist uses 19:00 and 01:28 IST and the README states the conversion and the daylight-saving change on 1 November 2026).
 - [ ] **Step 4:** Commit: `git commit -m "Log Pyth confidence and publishers at both mark times"`.
-- [ ] **Step 5 (after five weekdays):** Set `conf_cap_bps` per leg to the larger of the provisional value (§13: Friday 10, Monday 20) and 1.5 x the observed max at that leg, and `min_publishers` to 10 unless any observed minimum is below 15, in which case use half of that minimum. Record the chosen values in `scripts/README-measure.md` and in `service/src/config.ts` (Task 8).
+- [ ] **Step 5 (after five weekdays):** per leg, `conf_cap_bps = max(provisional, ceil(1.5 * p95_of_daily_p95))` with provisionals Friday 10, Monday 20; `min_publishers = 10` unless any observed minimum is below 10, then `observed_min - 1`. Write the values into `scripts/README-measure.md` and `service/src/config.ts`. Not a gate for Task 14: provisionals are used if this is not done.
 
-### Task 1: Anchor workspace and bankrun harness with the real Lazer verifier
+### Task 1: Toolchain spike and bankrun harness (go/no-go before any program code)
 
-**Files:**
-- Create: `Anchor.toml`, `Cargo.toml`, `programs/gap_cover/Cargo.toml`, `programs/gap_cover/src/lib.rs`, `tests/harness.ts`, `tests/harness.test.ts`, `package.json`, `vitest.config.ts`
-- Create: `fixtures/lazer/pytd2.so`, `fixtures/lazer/storage.json`, `fixtures/pyth/regular-2026-10-29.json` (copy of `../gapcover-spike/sample-regular.json`), `fixtures/pyth/premarket-2026-10-29.json`
-- Create: `scripts/dump-lazer.sh`
+**Files:** Create `Anchor.toml`, `Cargo.toml`, `programs/gap_cover/{Cargo.toml,src/lib.rs}`, `package.json`, `vitest.config.ts`, `tests/harness.ts`, `tests/harness.test.ts`, `scripts/dump-lazer.sh`, `fixtures/lazer/{pytd2.so,storage.json,treasury.json}`, `fixtures/pyth/{regular-2026-10-29.json,premarket-2026-10-29.json}` (copies of `../gapcover-spike/sample-*.json`).
 
-**Interfaces:**
-- Produces: `startHarness(): Promise<{ context, provider, program, payer, usdcMint, clock }>` loading `gap_cover`, the Lazer program `pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt` and its storage account `3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL` from fixtures; `warpTo(context, unixSeconds)`; `fixturePayload(name): Buffer` returning the 158-byte signed Solana payload.
+**Interfaces:** Produces
+- `startHarness(): Promise<{ context, provider, program, payer, usdcMint, clock }>` loading `gap_cover`, the dumped Lazer program, storage, and treasury (treasury pre-funded with 10_000_000 lamports)
+- `warpTo(context, unixSeconds): Promise<void>`
+- `fixturePayload(name): Buffer` (hex `solana.data` decoded to 158 bytes)
+- `createScaledMint(context, { decimals: 8, multiplier: number }): Promise<PublicKey>` and `scheduleMultiplier(context, mint, newMultiplier, effectiveTs)`: Token-2022 mint with the `ScaledUiAmount` extension, authority = harness payer
 
-- [ ] **Step 1:** `scripts/dump-lazer.sh` runs `solana program dump -u devnet pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt fixtures/lazer/pytd2.so` and `solana account -u devnet --output json 3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL > fixtures/lazer/storage.json`, plus the treasury account. Run it.
-- [ ] **Step 2:** Write `tests/harness.test.ts::verifies a genuine fixture through the Lazer program` sending `[createEd25519Instruction(payload, 1, 12), verify_message]` directly (as in `../gapcover-spike/verify.mjs`) and expecting success; and `::rejects a tampered fixture` expecting failure.
-- [ ] **Step 3:** Run `npx vitest run tests/harness.test.ts`; expect FAIL (harness missing).
-- [ ] **Step 4:** Implement `startHarness` and `warpTo`. Add `pyth-lazer-solana-contract = { version = "0.11", features = ["no-entrypoint", "cpi"] }`. If it will not compile against Anchor 0.30.1, upgrade the workspace to the Anchor version that crate requires and note it in `Anchor.toml`; do not fork the crate.
-- [ ] **Step 5:** Run the test; expect PASS.
-- [ ] **Step 6:** Commit: `git commit -m "Set up Anchor workspace and bankrun harness with Pyth's Lazer verifier"`.
+- [ ] **Step 1:** `scripts/dump-lazer.sh` dumps the program, storage and treasury from devnet. Run it.
+- [ ] **Step 2:** Write tests: `harness boots under the current Node`, `verifies a genuine fixture through the Lazer program` (raw `[createEd25519Instruction(payload, 1, 12), verify_message]`, as in `../gapcover-spike/verify.mjs`), `rejects a tampered fixture`, `scaled mint reports multiplier 1.0 then 1.0025 after the scheduled timestamp`.
+- [ ] **Step 3:** `npx vitest run tests/harness.test.ts`; expect FAIL.
+- [ ] **Step 4:** Implement. If `solana-bankrun` fails to load under Node 25, retry under Node 22; if it still fails, switch the harness to `litesvm` and record the choice in `README.md`. If the bankrun runtime lacks Token-2022, dump `TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb` from devnet into the harness.
+- [ ] **Step 5:** Run; expect PASS. This is the go/no-go: do not start Task 3 until all four pass.
+- [ ] **Step 6:** Commit: `git commit -m "Set up harness with Pyth's Lazer verifier and a scaled-UI test mint"`.
 
-### Task 2: Pure settlement maths
+### Task 2: Settlement maths (can run in parallel with Task 1)
 
-**Files:**
-- Create: `programs/gap_cover/src/math.rs` (unit tests in the same file)
+**Files:** Create `programs/gap_cover/src/math.rs` (tests in-file).
 
-**Interfaces:**
-- Produces:
-  - `pub fn gap_bps(friday: i64, monday: i64) -> Result<i128>` (signed; negative on a rise)
-  - `pub fn payout_per_contract(gap_bps: i128, lower_bps: u16, upper_bps: u16) -> u64` (in USDC base units, 0..=1_000_000, rounded down)
-  - `pub fn conf_ok(confidence: u64, price: i64, cap_bps: u16) -> bool`
-  - `pub fn rank_key(feed_ts_us: i64, target_us: i64, payload_hash: [u8; 32]) -> (u64, i64, [u8; 32])` (lower wins)
-  - `pub fn effective_multiplier_bits(multiplier: f64, new_multiplier: f64, effective_ts: i64, at: i64) -> u64`
+**Interfaces:** Produces
+- `pub fn gap_bps(friday: i64, monday: i64) -> Result<i128>`
+- `pub fn payout_per_contract(gap_bps: i128, lower_bps: u16, upper_bps: u16) -> u64`
+- `pub fn conf_ok(confidence: u64, price: i64, cap_bps: u16) -> bool`
+- `pub fn rank_key(feed_ts_us: i64, target_us: i64) -> (u64, i64)` (lower wins; replacement needs strictly lower)
+- `pub fn effective_multiplier_bits(multiplier_bits: u64, new_multiplier_bits: u64, effective_ts: i64, at: i64) -> u64` (works on raw `PodF64` bits; no float arithmetic on-chain)
 
 - [ ] **Step 1:** Write failing tests:
 
 ```rust
 #[test] fn payout_band() {
-    assert_eq!(payout_per_contract(gap_bps(10_000, 9_950).unwrap(), 100, 500), 0);       // 0.5%
+    assert_eq!(payout_per_contract(gap_bps(10_000, 9_950).unwrap(), 100, 500), 0);
     assert_eq!(payout_per_contract(100, 100, 500), 0);
     assert_eq!(payout_per_contract(101, 100, 500), 2_500);
     assert_eq!(payout_per_contract(200, 100, 500), 250_000);
     assert_eq!(payout_per_contract(500, 100, 500), 1_000_000);
     assert_eq!(payout_per_contract(1_000, 100, 500), 1_000_000);
-    assert_eq!(payout_per_contract(gap_bps(10_000, 10_300).unwrap(), 100, 500), 0);      // rise
+    assert_eq!(payout_per_contract(gap_bps(10_000, 10_300).unwrap(), 100, 500), 0);
 }
 #[test] fn conf_cross_multiplied() {
-    assert!(conf_ok(21_057, 21_430_043, 10));        // fixture, 9.8 bps
-    assert!(!conf_ok(21_457, 21_430_043, 10));       // just over 10 bps
+    assert!(conf_ok(21_057, 21_430_043, 10));
+    assert!(!conf_ok(21_457, 21_430_043, 10));
 }
-#[test] fn rank_prefers_closest_then_earlier_then_hash() {
+#[test] fn rank_strict() {
     let t = 1_000_000_000;
-    assert!(rank_key(t + 200_000, t, [0; 32]) < rank_key(t - 300_000, t, [0; 32])); // closer wins
-    assert!(rank_key(t - 200_000, t, [9; 32]) < rank_key(t + 200_000, t, [0; 32])); // tie: earlier wins
-    assert!(rank_key(t, t, [1; 32]) < rank_key(t, t, [2; 32]));                     // tie: lower hash wins
+    assert!(rank_key(t + 200_000, t) < rank_key(t - 300_000, t));
+    assert!(rank_key(t - 200_000, t) < rank_key(t + 200_000, t));
+    assert_eq!(rank_key(t + 5, t), rank_key(t + 5, t)); // exact tie: not strictly lower, keeps earlier
 }
-#[test] fn multiplier_past_change_is_not_pending() {
-    assert_eq!(effective_multiplier_bits(1.0, 1.0025, 100, 200), 1.0025f64.to_bits());
-    assert_eq!(effective_multiplier_bits(1.0, 1.0025, 300, 200), 1.0f64.to_bits());
+#[test] fn multiplier_effective() {
+    let (a, b) = (1.0f64.to_bits(), 1.0025f64.to_bits());
+    assert_eq!(effective_multiplier_bits(a, b, 100, 200), b);
+    assert_eq!(effective_multiplier_bits(a, b, 300, 200), a);
 }
 ```
 
 - [ ] **Step 2:** `cargo test -p gap_cover math`; expect FAIL.
-- [ ] **Step 3:** Implement. `payout_per_contract` computes `(gap - lower) * 1_000_000 / (upper - lower)` in i128 and clamps.
+- [ ] **Step 3:** Implement (`payout = clamp((gap - lower) * 1_000_000 / (upper - lower), 0, 1_000_000)` in i128).
 - [ ] **Step 4:** Run; expect PASS.
 - [ ] **Step 5:** Commit: `git commit -m "Add settlement maths with band-edge tests"`.
 
-### Task 3: Pyth payload parsing and eligibility
+### Task 3: Payload parser, Ed25519 checks and Lazer CPI
 
-**Files:**
-- Create: `programs/gap_cover/src/pyth.rs`, `programs/gap_cover/src/sigverify.rs`
+**Files:** Create `programs/gap_cover/src/pyth.rs`, `programs/gap_cover/src/sigverify.rs`, `programs/gap_cover/src/lazer.rs`; test data `programs/gap_cover/tests/data/{regular,premarket}.hex`.
 
 **Interfaces:**
 - Consumes: `conf_ok` (Task 2).
 - Produces:
-  - `pub struct PriceReport { pub timestamp_us: i64, pub feed_update_ts_us: i64, pub price: i64, pub exponent: i16, pub confidence: u64, pub publishers: u16, pub session: MarketSession, pub feed_id: u32 }`
-  - `pub fn parse_report(payload: &[u8], feed_id: u32) -> Result<PriceReport>`; uses `pyth-lazer-protocol`'s payload decoder, or a hand-written little-endian parser tested against the fixtures if that crate conflicts.
-  - `pub fn check_eligible(r: &PriceReport, market: &Market, leg: Leg) -> Result<()>` enforcing every bullet of §5 with distinct errors: `WrongFeed, WrongSession, CarriedForward, OutsideWindow, ZeroPrice, WrongExponent, WideConfidence, TooFewPublishers`.
-  - `pub fn require_ed25519_at_index0(ix_sysvar: &AccountInfo, expected_signer: Option<Pubkey>) -> Result<(Pubkey, Vec<u8>)>` returning the signer and message from instruction 0 and asserting the current instruction is index 1.
+  - `pub struct PriceReport { timestamp_us: i64, feed_id: u32, price: i64, exponent: i16, confidence: u64, publishers: u16, session: MarketSession, feed_update_ts_us: i64 }`
+  - `pub fn parse_report(signed_message: &[u8], feed_id: u32) -> Result<PriceReport>`: parses the Solana-format envelope (4-byte magic, 64-byte signature, 32-byte public key, u16 payload length, payload) and the little-endian payload per Pyth's documented binary format, using only the fixture-verified property order requested by the service (`price, exponent, confidence, publisherCount, marketSession, feedUpdateTimestamp`)
+  - `pub fn check_eligible(r: &PriceReport, market: &Market, leg: Leg) -> Result<()>` with errors `WrongFeed, WrongSession, CarriedForward, OutsideWindow, ZeroPrice, WrongExponent, WideConfidence, TooFewPublishers`
+  - `pub fn require_ed25519_at_index0(ix_sysvar: &AccountInfo, expected_signer: Option<Pubkey>) -> Result<(Pubkey, Vec<u8>)>`: asserts current instruction index is 1 and instruction 0 is the Ed25519 program with exactly one signature, then reads the 14-byte offsets header and asserts the signature, public key and message offsets all point into the expected instruction at the expected positions with the expected message length; returns signer and message
+  - `pub fn lazer_verify(accounts, signed_message: &[u8]) -> Result<()>`: raw `invoke` of `verify_message` with discriminator `sha256("global:verify_message")[..8]`, Borsh `(Vec<u8>, u16 = 0, u8 = 0)`, accounts per Global Constraints
 
-- [ ] **Step 1:** Write failing tests: `parse_report` on `fixtures/pyth/regular-2026-10-29.json` returns price 21_430_043, exponent -5, confidence 21_057, publishers 20, session Regular, `feed_update_ts_us == timestamp_us == 1_793_280_669_400_000`; on the premarket fixture returns session PreMarket. One `check_eligible` test per error variant, built by editing a parsed fixture.
-- [ ] **Step 2:** Run `cargo test -p gap_cover pyth`; expect FAIL.
+- [ ] **Step 1:** Write failing tests: `parse_report(regular.hex)` gives price 21_430_043, exponent -5, confidence 21_057, publishers 20, session Regular, `feed_update_ts_us == timestamp_us == 1_793_280_669_400_000`; premarket gives PreMarket; one `check_eligible` test per error; `require_ed25519_at_index0` rejects a header whose message offset points at a different instruction, and one with two signatures.
+- [ ] **Step 2:** `cargo test -p gap_cover pyth sigverify`; expect FAIL.
+- [ ] **Step 3:** Implement. The Lazer signature covers exactly the bytes parsed, so a parsing mistake can misread a field but cannot accept a forged price; the fixture tests guard the field reads.
+- [ ] **Step 4:** Run; expect PASS.
+- [ ] **Step 5:** Commit: `git commit -m "Parse Pyth payloads, check Ed25519 layout and call the Lazer verifier"`.
+
+### Task 4: `create_market` and `submit_report`
+
+**Files:** Create `programs/gap_cover/src/state.rs`, `src/instructions/create_market.rs`, `src/instructions/submit_report.rs`; test `tests/create_and_report.test.ts`.
+
+**Interfaces:**
+- Produces:
+  - `Market` with all §6 parameters plus `state: MarketState { Created, FridayFinal, MondayFinal, Voided }`, `friday: Option<Candidate>`, `monday: Option<Candidate>`, `contracts_sold: u32`, `total_premiums: u64`, `open_positions: u32`, `swept: bool`, `payout_per_contract: u64`, `buying_closed: bool`
+  - `Candidate { price: i64, feed_ts_us: i64, submitter: Pubkey }`
+  - `create_market(params: MarketParams)`; market PDA `["market", dealer, friday_target_ts.to_le_bytes()]`; vault authority PDA `["vault", market]` owns `escrow`, `collateral_reserve`, `bounty_reserve`
+  - `submit_report(leg: Leg, signed_message: Vec<u8>)` (real markets)
+  - `submit_sandbox_price(leg: Leg, price: i64)` (sandbox; signer `demo_authority`; Friday at creation sets `FridayFinal` immediately; Monday sets `buying_closed` and finalises in Task 7)
+- [ ] **Step 1:** Write failing tests: reserves hold `max_contracts * 1_000_000` and `200_000`; real market with Monday target 1_793_280_672: submitting the regular fixture after warping to the target makes it the candidate with the submitter stored; a second identical-timestamp submission does not replace it; Ed25519 at index 1 fails `WrongInstructionLayout`; submission after T + 7 min fails `WindowClosed`; Monday report before `FridayFinal` fails `WrongState`; Friday report after `FridayFinal` fails `WrongState`; real market created under 3_600 s before Friday target fails; sandbox: `submit_report` rejected, non-authority `submit_sandbox_price` rejected, Friday sandbox price moves straight to `FridayFinal`; real market rejects `submit_sandbox_price`.
+- [ ] **Step 2:** `npx vitest run tests/create_and_report.test.ts`; expect FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run; expect PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Parse Pyth Pro payloads and enforce report eligibility"`.
+- [ ] **Step 5:** Commit: `git commit -m "Create markets and accept verified reports"`.
 
-### Task 4: Market creation and `submit_report`
+### Task 5: `finalise_friday`
 
-**Files:**
-- Create: `programs/gap_cover/src/state.rs`, `programs/gap_cover/src/instructions/create_market.rs`, `programs/gap_cover/src/instructions/submit_report.rs`
-- Test: `tests/create_and_report.test.ts`
+**Files:** Create `programs/gap_cover/src/instructions/finalise.rs`; test `tests/finalise_friday.test.ts`.
 
-**Interfaces:**
-- Consumes: Tasks 2 and 3.
-- Produces:
-  - `Market` account with every §6 parameter plus `state: MarketState { Created, FridayFinal, MondayFinal, Voided }`, `friday: Option<Candidate>`, `monday: Option<Candidate>`, `contracts_sold: u32`, `total_premiums: u64`, `open_positions: u32`, `swept: bool`, `payout_per_contract: u64`. The NVDAx reference price `f_x` is not stored on-chain; the dealer service records it when it sees `FridayFinal` (Task 9).
-  - `Candidate { price: i64, feed_ts_us: i64, payload_hash: [u8; 32], submitter: Pubkey }`
-  - `create_market(params: MarketParams)`, PDA seeds `["market", dealer, friday_target_ts.to_le_bytes()]`; reserves are token accounts with PDA authority `["vault", market]`
-  - `submit_report(leg: Leg, payload: Vec<u8>)` for real markets (CPI to `pyth_lazer_solana_contract::cpi::verify_message` with `ed25519_instruction_index = 0`); `submit_sandbox_price(leg: Leg, price: i64)` for sandbox markets, signer must be `demo_authority`
-- [ ] **Step 1:** Write failing tests: create a market whose Monday target is 1_793_280_672 (3 s after the fixture) and assert both reserves hold `max_contracts * 1_000_000` and `200_000`; submit the regular fixture as the Monday report after warping to the target and assert it becomes the candidate with the submitter stored; submit with the Ed25519 instruction at index 1 and assert `WrongInstructionLayout`; submit after T + 7 min and assert `WindowClosed`; on a sandbox market assert `submit_report` is rejected and `submit_sandbox_price` by a non-authority is rejected; on a real market assert `submit_sandbox_price` is rejected; on a sandbox market created at time C assert the Friday target is C + 5, buying close C + 45, Monday target C + 60, and the submission window 5 s, all enforced by the program.
-- [ ] **Step 2:** `npx vitest run tests/create_and_report.test.ts`; expect FAIL.
-- [ ] **Step 3:** Implement. `create_market` rejects targets less than 3_600 s ahead on real markets. Replacement uses `rank_key`.
-- [ ] **Step 4:** Run; expect PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Create markets and accept verified Pyth reports"`.
+**Interfaces:** Produces `finalise_friday()` (anyone): with a candidate, `FridayFinal` and 100_000 to the stored submitter's USDC account; without one, `Voided` with all reserves returned to the dealer; reads the NVDAx mint and voids under §8.
 
-### Task 5: `finalise_friday`, `finalise_monday` and void rules
-
-**Files:**
-- Create: `programs/gap_cover/src/instructions/finalise.rs`
-- Test: `tests/finalise.test.ts`
-
-**Interfaces:**
-- Consumes: Tasks 2 to 4.
-- Produces: `finalise_friday()` and `finalise_monday()` (signer anyone); both read the NVDAx mint's Token-2022 `ScaledUiAmountConfig` and apply §8.
-- [ ] **Step 1:** Write failing tests: Friday with candidate moves to `FridayFinal` and pays 100_000 to the stored submitter; Friday without candidate moves to `Voided`; Monday at a 2% fall sets `payout_per_contract = 250_000` and leaves `contracts_sold * 250_000` in escrow; Monday at a rise sets 0 and does not fail; multiplier changed after creation voids at either finalisation; a change scheduled before the Monday target voids; a past effective timestamp equal to the creation-time value does not void; finalise before the window ends fails with `WindowOpen`.
-- [ ] **Step 2:** Run; expect FAIL.
-- [ ] **Step 3:** Implement the §9 distributions for `MondayFinal` and `Voided`.
-- [ ] **Step 4:** Run; expect PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Finalise each mark and apply void rules"`.
+- [ ] **Step 1:** Write failing tests for each branch, `WindowOpen` before T + 7 min, and a multiplier scheduled before the Monday target voiding (using `scheduleMultiplier` from Task 1).
+- [ ] **Step 2:** Run; expect FAIL. **Step 3:** Implement. **Step 4:** Run; expect PASS.
+- [ ] **Step 5:** Commit: `git commit -m "Finalise the Friday afternoon mark"`.
 
 ### Task 6: `buy` with dealer-signed quotes
 
-**Files:**
-- Create: `programs/gap_cover/src/instructions/buy.rs`, `programs/gap_cover/src/quote.rs`
-- Test: `tests/buy.test.ts`
+**Files:** Create `src/instructions/buy.rs`, `src/quote.rs`; test `tests/buy.test.ts`.
 
-**Interfaces:**
-- Produces:
-  - Quote message, 92 bytes little-endian: `b"MGCQ"` | market (32) | buyer (32) | contracts u32 | premium_per_contract u64 | expiry i64 | nonce u64
-  - `pub fn decode_quote(msg: &[u8]) -> Result<Quote>`; TypeScript twin `encodeQuote(q): Buffer` in `service/src/quote.ts` (Task 9)
-  - `buy()` with no arguments; `Position` PDA seeds `["position", market, buyer]` with `contracts, premium_paid, last_nonce, closed`
-- [ ] **Step 1:** Write failing tests: a valid quote moves `total_premium` from buyer and `contracts * 1_000_000 - total_premium` from the reserve, so escrow equals `contracts_sold * 1_000_000`; `open_positions` increments only on the first buy; rejects: signer not the dealer key, buyer mismatch, expired by clock, `nonce != last_nonce + 1`, premium 0, premium 1_000_000, capacity exceeded, before `FridayFinal`, after buying close, Ed25519 instruction not at index 0. Review Focus 2: two quotes with the same nonce, first buy succeeds, second fails with `QuoteUsed`.
-- [ ] **Step 2:** Run; expect FAIL.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Run; expect PASS.
+**Interfaces:** Produces
+- Quote message, 96 bytes little-endian: `b"MGCQ"` (4) | market (32) | buyer (32) | contracts u32 (4) | premium_per_contract u64 (8) | expiry i64 (8) | nonce u64 (8)
+- `pub fn decode_quote(msg: &[u8]) -> Result<Quote>` rejecting any length other than 96
+- `buy()` with no arguments; `Position` PDA `["position", market, buyer]` = `{ contracts: u32, premium_paid: u64, last_nonce: u64, closed: bool }`
+
+- [ ] **Step 1:** Write failing tests: a 95- or 97-byte message fails `BadQuote`; a valid quote moves `total_premium` from the buyer and `contracts * 1_000_000 - total_premium` from the reserve, so escrow equals `contracts_sold * 1_000_000`; `open_positions` increments only on a buyer's first buy; rejections for signer not the dealer, buyer mismatch, expired, `nonce != last_nonce + 1`, premium 0, premium 1_000_000, over capacity, before `FridayFinal`, after buying close or `buying_closed`, Ed25519 not at index 0; Review Focus 2 (two quotes, same nonce, second fails `QuoteUsed`).
+- [ ] **Step 2:** Run; expect FAIL. **Step 3:** Implement. **Step 4:** Run; expect PASS.
 - [ ] **Step 5:** Commit: `git commit -m "Sell cover against dealer-signed quotes"`.
 
-### Task 7: `claim`, `refund`, `sweep`, `close_market`
+### Task 7: `finalise_monday` and void distribution
 
-**Files:**
-- Create: `programs/gap_cover/src/instructions/settle_out.rs`
-- Test: `tests/settle_out.test.ts`
+**Files:** Modify `src/instructions/finalise.rs`; test `tests/finalise_monday.test.ts`.
 
-**Interfaces:**
-- Produces: `claim()`, `refund()`, `sweep()`, `close_market()` per §9 and §10; destination token account must be owned by the position owner.
-- [ ] **Step 1:** Write failing tests: claim pays `contracts * payout_per_contract` and closes the position; a zero-payout claim closes the position; claim twice fails; claim to someone else's token account fails; refund pays `premium_paid` only in `Voided`; refund still works 60 days later; sweep fails before 30 days and succeeds after in `MondayFinal`; sweep fails in `Voided`; close fails with open positions and succeeds when `open_positions == 0`, when swept, or when voided with no sales.
+**Interfaces:** Produces `finalise_monday()` (anyone; on sandbox markets callable as soon as the Monday sandbox price is set).
+
+- [ ] **Step 1:** Write failing tests: 2% fall sets `payout_per_contract = 250_000`, escrow keeps `contracts_sold * 250_000`, the dealer receives escrow remainder plus unused reserve, the Monday bounty goes to the stored submitter; a rise sets 0 without failing; no candidate voids; multiplier differs at Monday voids; on `Voided`, escrow keeps exactly `total_premiums` and the dealer receives the rest of escrow, the unused reserve and any unpaid bounty in the same instruction.
+- [ ] **Step 2:** Run; expect FAIL. **Step 3:** Implement. **Step 4:** Run; expect PASS.
+- [ ] **Step 5:** Commit: `git commit -m "Finalise the Monday morning mark and distribute funds"`.
+
+### Task 8: `claim`, `refund`, `sweep`, `close_market`
+
+**Files:** Create `src/instructions/settle_out.rs`; test `tests/settle_out.test.ts`.
+
+- [ ] **Step 1:** Write failing tests: claim pays `contracts * payout_per_contract` into the owner's account and closes the position; a zero-payout claim closes it; double claim fails; claim to another wallet's token account fails; refund pays `premium_paid` only in `Voided`, still works 60 days later; sweep fails before 30 days and in `Voided`, succeeds after 30 days in `MondayFinal`; close fails with open positions, succeeds when `open_positions == 0`, when swept, or when voided with no sales; `idl has no transfer instruction` asserts the instruction names are exactly `create_market, submit_report, submit_sandbox_price, finalise_friday, finalise_monday, buy, claim, refund, sweep, close_market`.
+- [ ] **Step 2:** Run; expect FAIL. **Step 3:** Implement. **Step 4:** `npx vitest run && cargo test -p gap_cover`; expect PASS.
+- [ ] **Step 5:** Commit: `git commit -m "Pay claims and refunds; sweep and close markets"`.
+
+### Task 9: Devnet deployment, test mint and demo USDC
+
+**Files:** Create `scripts/deploy-devnet.sh`, `scripts/create-test-mints.ts`, `scripts/schedule.ts`; test `tests/schedule.test.ts` with fixture `fixtures/pyth/symbols-1314.json` (saved response of the public `https://pyth.dourolabs.app/v1/symbols?query=NVDA`, verified 30 Oct 2026 to need no auth and to carry the holiday schedule).
+
+**Interfaces:** Produces devnet program id; "NVDAx (test)" Token-2022 mint (8 decimals, ScaledUiAmount) and a "USDC (demo)" mint, both with authority held by the dealer key; `scheduleTargets(dateEt): { fridayTargetUtc, mondayTargetUtc } | "holiday"`.
+
+- [ ] **Step 1:** Write failing tests: `scheduleTargets` gives 12:59:30 ET for Friday 27 November 2026, "holiday" for 26 November, 15:59:30 ET and 09:31:30 ET for 20 and 23 November.
+- [ ] **Step 2:** Run; expect FAIL. **Step 3:** Implement; `anchor deploy --provider.cluster devnet`; create both mints; mint the dealer 10_000 demo USDC (real-weekend `max_contracts` = 5_000).
+- [ ] **Step 4:** Run; expect PASS; confirm the program on Solana Explorer (devnet).
+- [ ] **Step 5:** Commit: `git commit -m "Deploy to devnet with test mints and schedule handling"`.
+
+### Task 10: Dealer service, Pyth side
+
+**Files:** Create `service/{package.json,src/config.ts,src/pyth.ts,src/archive.ts,src/keeper.ts}`; tests `service/test/{archive,keeper}.test.ts`.
+
+**Interfaces:** Produces
+- `streamNvda(onUpdate: (u: SignedUpdate) => void): () => void` over all three endpoints; `SignedUpdate = { messageHex, feedTsUs: bigint, timestampUs: bigint, price: bigint, exponent: number, confidence: bigint, publishers: number, session: string, hash: string }`
+- `Archive.add(u)` (dedup by hash), `Archive.eligible(targetUs, params): SignedUpdate[]` applying every §5 bullet, sorted by `(|feedTs - T|, feedTs)`; served at `GET /archive/:market/:leg`
+- `Keeper.run(market)`: from T + 2 s submits the best eligible update; resubmits only an update strictly better than the on-chain candidate; never resubmits a rejected one; calls the right finalise after T + 7 min
+
+- [ ] **Step 1:** Write failing tests for Review Focus 3: duplicates stored once; out-of-order arrival yields the right best; updates failing session, freshness, confidence, publishers, exponent or price are excluded; a rejected submission is marked and skipped.
+- [ ] **Step 2:** `cd service && npx vitest run`; expect FAIL. **Step 3:** Implement. **Step 4:** Run; expect PASS.
+- [ ] **Step 5:** Commit: `git commit -m "Stream, archive and submit Pyth reports"`.
+
+### Task 11: Dealer service, pricing, quotes, sandbox and relay
+
+**Files:** Create `service/src/{jupiter.ts,pricing.ts,quote.ts,sandbox.ts,relay.ts,server.ts}`, `service/data/nvda-gaps.csv`, `scripts/build-gaps.mjs`; tests `service/test/{pricing,quote,relay}.test.ts`.
+
+**Interfaces:** Produces
+- `nvdaxReference(): Promise<{ price, roundTripBps, multiplier, decimals } | null>` against the real mainnet NVDAx mint via Jupiter (§7)
+- `premiumPerContract({ gaps, m, sold, max }): number | null` (null at or above 0.95)
+- `Freeze.update(ref, nowMs)`, `Freeze.isFrozen(nowMs)`; sandbox markets ignore the freeze and fall back to the last good reference
+- `encodeQuote(q): Buffer` (96 bytes, Task 6 layout), `signQuote(q, dealerKey)`
+- HTTP: `GET /quote?market&buyer&contracts`, `POST /sandbox/start {mode}`, `POST /sandbox/bell {market}`, `POST /relay`, `POST /faucet {wallet}`
+- [ ] **Step 1:** Write failing tests: gaps all 0 and m 0 gives premium 0.007; gaps `[0.02]`, m 0, sold 0 gives 0.3195; at sold = max utilisation adds `2 * base`; 0.95 or more returns null; each freeze trigger and the 15-minute lift; `encodeQuote` output is 96 bytes and decodes with Task 6's Rust `decode_quote` test vector; nonce from `Position.last_nonce` reused across refreshes; `sandbox.bell` picks the Monday fall only after buying is closed; `/relay` rejects any transaction whose program is not `gap_cover`, whose market is not sandbox, whose instruction is not `buy`, `claim` or `refund`, or with more than 3 instructions or 400_000 compute units.
 - [ ] **Step 2:** Run; expect FAIL.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Add `tests/settle_out.test.ts::idl has no transfer instruction` asserting the IDL's instruction names are exactly `create_market, submit_report, submit_sandbox_price, finalise_friday, finalise_monday, buy, claim, refund, sweep, close_market`. Run full suite `npx vitest run && cargo test -p gap_cover`; expect PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Pay out claims and refunds; sweep and close markets"`.
-
-### Task 8: Dealer service, Pyth side
-
-**Files:**
-- Create: `service/package.json`, `service/src/config.ts`, `service/src/pyth.ts`, `service/src/archive.ts`, `service/src/keeper.ts`
-- Test: `service/test/archive.test.ts`, `service/test/keeper.test.ts`
-
-**Interfaces:**
-- Produces:
-  - `streamNvda(onUpdate: (u: SignedUpdate) => void): () => void` over all three endpoints, `SignedUpdate = { payloadHex: string, feedTsUs: bigint, timestampUs: bigint, price: bigint, confidence: bigint, publishers: number, session: string, hash: string }`
-  - `Archive.add(u)` (dedup by `hash`), `Archive.window(targetUs: bigint): SignedUpdate[]` (T ± 5 s), served at `GET /archive/:market/:leg`
-  - `Keeper.run(market)`: at T + 2 s submits the closest eligible update; until T + 7 min resubmits whenever the archive has a strictly closer one than the on-chain candidate; then calls the right finalise.
-- [ ] **Step 1:** Write failing tests: duplicates by hash stored once; out-of-order arrival still yields the closest by `(|feedTs - T|, feedTs, hash)`; updates with `session != regular` or `feedTs != timestampUs` excluded from the window. Review Focus 3.
-- [ ] **Step 2:** `cd service && npx vitest run`; expect FAIL.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Run; expect PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Stream, archive and submit Pyth reports from the dealer service"`.
-
-### Task 9: Dealer service, pricing, quotes, sandbox and fee payer
-
-**Files:**
-- Create: `service/src/jupiter.ts`, `service/src/pricing.ts`, `service/src/quote.ts`, `service/src/sandbox.ts`, `service/src/relay.ts`, `service/src/server.ts`, `service/data/nvda-gaps.csv`
-- Test: `service/test/pricing.test.ts`, `service/test/quote.test.ts`
-
-**Interfaces:**
-- Produces:
-  - `nvdaxReference(): Promise<{ price: number, roundTripBps: number, multiplier: number, decimals: number } | null>` (§7 formulas; null when Jupiter has no route)
-  - `premiumPerContract({ gaps: number[], m: number, sold: number, max: number }): number | null` (null at or above 0.95)
-  - `Freeze.update(ref, nowMs)` and `Freeze.isFrozen(nowMs)` (5% in 30 min, round trip over 100 bps, or no route; auto-resume after 15 min clean)
-  - `signQuote(q: Quote, dealerKey): { message: Buffer, signature: Buffer }`, `encodeQuote(q): Buffer` matching Task 6's 92-byte layout
-  - HTTP: `GET /quote?market&buyer&contracts`, `POST /sandbox/start {mode: "gap"|"multiplier_void"}`, `POST /relay` (fee payer, sandbox buy/claim/refund only)
-- [ ] **Step 1:** Write failing tests: with all historical gaps 0 and `m = 0`, base 0 and premium 0.007; with gaps `[0.02]`, `m = 0`, sold 0 the premium is 0.25 + 0.0675 + 0.002 = 0.3195; at sold = max utilisation adds `2 * base`; premium at or above 0.95 returns null; freeze triggers on each condition and lifts after 15 clean minutes; `encodeQuote` bytes equal a fixture produced by the Rust `decode_quote` test; nonce read from `Position.last_nonce` and reused across refreshes; `sandbox.start("gap")` picks the Monday fall (0.5%, 2.5% or 6%) only after the market's buying close has passed, never before.
-- [ ] **Step 2:** Run; expect FAIL.
-- [ ] **Step 3:** Implement. Build `nvda-gaps.csv` (last 104 Friday-close to Monday 09:31 gaps) with a one-off script in `scripts/` from a free daily/intraday source; record the source in the CSV header. Then calibrate: run the §7 formula over the 104 weekends and adjust the uncertainty coefficient (0.25) and reserve (0.002) only if the dealer's simulated total P&L is negative; record any change in `config.ts` and the spec's §13.
+- [ ] **Step 3:** Implement. `build-gaps.mjs` builds the last 104 weekends from free daily data as Friday close to Monday open, and the CSV header and README label them as that proxy, not the exact 15:59:30 and 09:31:30 marks. Use Pyth Pro history instead if the token covers it.
 - [ ] **Step 4:** Run; expect PASS.
 - [ ] **Step 5:** Commit: `git commit -m "Price, sign and relay quotes; run sandbox markets"`.
 
-### Task 10: Test mint, faucet and devnet deployment
+### Task 12: Public service deployment
 
-**Files:**
-- Create: `scripts/create-test-mint.ts`, `scripts/deploy-devnet.sh`, `scripts/create-weekend-market.ts`
-- Test: `tests/test-mint.test.ts`
+**Files:** Create `service/Dockerfile`, `service/fly.toml` (or the chosen host's config), `docs/deploy-service.md`.
 
-**Interfaces:**
-- Produces: a Token-2022 mint "NVDAx (test)" with 8 decimals and the `ScaledUiAmount` extension, mint and multiplier authority held by the dealer service; `faucet(wallet)` endpoint in `server.ts` giving 100 test NVDAx and 1,000 demo USDC once per wallet; `create-weekend-market.ts` reads Pyth's schedule for feed 1314 from `https://pyth.dourolabs.app/v1/symbols`, refuses holidays and scheduled multiplier changes, and moves the Friday target to 12:59:30 ET on early closes.
-- [ ] **Step 1:** Write failing test: `scheduleTargets(date)` returns 12:59:30 ET for Friday 27 November 2026 and refuses Thursday 26 November; multiplier update on the test mint changes `effective_multiplier_bits`.
-- [ ] **Step 2:** Run; expect FAIL.
-- [ ] **Step 3:** Implement; deploy the program to devnet with `anchor deploy --provider.cluster devnet`.
-- [ ] **Step 4:** Run; expect PASS; confirm the program id on Solana Explorer (devnet).
-- [ ] **Step 5:** Commit: `git commit -m "Add test mint, faucet and devnet deployment scripts"`.
+- [ ] **Step 1:** Deploy the service to a host that keeps a long-running WebSocket process (Fly.io, Railway or Render); not Vercel functions. Secrets `PYTH_PRO_TOKEN`, dealer key and demo-authority key as host secrets only; HTTPS; CORS restricted to the app's origin.
+- [ ] **Step 2:** Verify from a clean machine: `GET /quote` returns a 96-byte signed quote; `GET /archive/...` responds; `/relay` rejects a non-sandbox transaction.
+- [ ] **Step 3:** Commit: `git commit -m "Deploy the dealer service"`.
 
-### Task 11: Web app
+### Task 13: Web app
 
-**Files:**
-- Create: `app/` (Vite React): `src/App.tsx`, `src/components/Calculator.tsx`, `src/components/BuyPanel.tsx`, `src/components/LockedView.tsx`, `src/components/ProofScreen.tsx`, `src/components/Sandbox.tsx`, `src/lib/program.ts`
-- Test: `app/src/__tests__/calculator.test.tsx`, `app/src/__tests__/states.test.tsx`
+**Files:** Create `app/` (Vite React): `src/App.tsx`, `src/components/{Calculator,BuyPanel,LockedView,ProofScreen,Sandbox}.tsx`, `src/lib/program.ts`; tests `app/src/__tests__/{calculator,states,copy}.test.tsx`. `VITE_SERVICE_URL` = Task 12's URL.
 
-**Interfaces:**
-- Consumes: service HTTP endpoints (Task 9), program IDL (Tasks 4 to 7).
-- [ ] **Step 1:** Write failing tests: calculator for a $5,000 holding suggests 200 contracts and shows net loss at 2% fall = $100 - $50 + premium; app renders a state card and a "Try the sandbox" button in every market state including no market (Review Focus 1); buy button shows "Not enough USDC" and requests no signature when balance < total premium (Review Focus 4); no rendered text matches `/\bopen\b/i` near "Monday" or "Friday" (copy rule).
+- [ ] **Step 1:** Write failing tests: $5,000 holding suggests 200 contracts; net loss at a 2% fall equals $100 - $50 + premium; every market state, including none, renders a state card and "Try the sandbox" (Review Focus 1); USDC below total premium shows "Not enough USDC" and requests no signature (Review Focus 4); no rendered text in any state matches `/\bopen\b/i`.
 - [ ] **Step 2:** `cd app && npx vitest run`; expect FAIL.
-- [ ] **Step 3:** Implement. Quotes auto-refresh at 60 s. The proof screen shows signed price, session, both timestamps, publishers, confidence and escrow at finalisation.
-- [ ] **Step 4:** Run; expect PASS; deploy to Vercel as a preview and run one sandbox gap cycle end to end in a browser.
-- [ ] **Step 5:** Commit: `git commit -m "Add the web app: calculator, buy, locked view, proof and sandbox"`.
+- [ ] **Step 3:** Implement; quotes refresh at 60 s; the sandbox shows "Ring the Monday bell" after a buy; the proof screen shows signed price, session, both timestamps, publishers, confidence and escrow at finalisation.
+- [ ] **Step 4:** Run; expect PASS; deploy to Vercel and run one sandbox gap cycle and one multiplier-void cycle in a browser with a fresh wallet.
+- [ ] **Step 5:** Commit: `git commit -m "Add the web app"`.
 
-### Task 12: Real weekend, README and submission material
+### Task 14: Real weekend, README and submission material
 
-**Files:**
-- Create: `README.md`, `docs/runbook-weekend.md`
-- Modify: `service/src/config.ts` (final caps from Task 0)
+**Files:** Create `README.md`, `docs/runbook-weekend.md`.
 
-- [ ] **Step 1:** Write `runbook-weekend.md`: create market Friday 27 November 2026 by 11:59:30 ET (an hour before the 12:59:30 early-close target), keeper running, buy one position from a test wallet, confirm Monday 30 November finalisation, claim. If ready earlier, also run 20 to 23 November.
-- [ ] **Step 2:** Run the weekend; save every transaction link. On devnet, also send one 45-minute-old fixture and one tampered fixture to `submit_report` and save both failed transaction signatures.
-- [ ] **Step 3:** Write `README.md`: product in the §1 wording, the Roster distinction sentence, the challenge-archive disclosure (§5), "program checks signatures, not price fairness" (§7), the backtest table (last 20 weekends, payout for 200 contracts, premium from §7), the recorded old-payload and tampered-payload rejections, and the real weekend's transaction links. Fallback per §12 if the weekend failed.
-- [ ] **Step 4:** Grep the README, app and video script for `open` near "Monday"/"Friday" and for "holders only", "liquidation insurance"; expect no matches.
+- [ ] **Step 1:** Runbook: create the market by 11:59:30 ET Friday 27 November 2026 (an hour before the 12:59:30 early-close target), keeper running, buy one position, confirm Monday 30 November finalisation, claim. Optional rehearsal 20 to 23 November.
+- [ ] **Step 2:** Run it; save every transaction link. Submit one archived update from about 45 minutes before the Friday target and one tampered update, and save both failed transactions.
+- [ ] **Step 3:** README: §1 product wording and the Roster sentence; §5 archive disclosure; §7 "program checks signatures, not price fairness"; backtest table (20 weekends, payout for 200 contracts, premium, labelled as the Friday-close-to-Monday-open proxy); the recorded rejections; the real weekend's links, or the §12 fallback if it failed.
+- [ ] **Step 4:** Grep README, app source and video script for `\bopen\b`, "holders only" and "liquidation insurance"; expect no matches.
 - [ ] **Step 5:** Commit: `git commit -m "Document the real weekend settlement and the product"`.
