@@ -15,9 +15,9 @@ mkdir -p keys
 [ -f keys/gap_cover-keypair.json ] || cp "$KP" keys/gap_cover-keypair.json
 chmod 600 keys/gap_cover-keypair.json
 
-# Size the program account close to the binary (+10% headroom, 16-byte aligned) to save rent.
+# Size the program account close to the binary (1.5x for upgrades during the build week, 16-byte aligned) to save rent.
 SIZE=$(wc -c < "$SO" | tr -d ' ')
-MAX_LEN=$(( (SIZE * 11 / 10 + 15) / 16 * 16 ))
+MAX_LEN=$(( (SIZE * 3 / 2 + 15) / 16 * 16 ))
 echo "so=$SIZE bytes, max-len=$MAX_LEN"
 
 solana program deploy "$SO" \

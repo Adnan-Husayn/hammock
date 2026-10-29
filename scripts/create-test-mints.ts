@@ -1,7 +1,7 @@
 // Creates "NVDAx (test)" (Token-2022, 8 decimals, ScaledUiAmount multiplier 1.0) and "USDC (demo)" (6 decimals),
 // mints the dealer 10_000 demo USDC, and writes config/devnet.json.
 // Usage: RPC_URL=... DEALER_KEYPAIR=~/.config/solana/id.json node scripts/create-test-mints.ts
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import {
   Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction,
@@ -18,6 +18,9 @@ const dealer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(key
 const conn = new Connection(RPC, "confirmed");
 
 async function main() {
+  if (existsSync("config/devnet.json") && process.env.FORCE !== "1") {
+    throw new Error("config/devnet.json exists; set FORCE=1 to create new mints");
+  }
   // NVDAx (test): Token-2022 with ScaledUiAmount, multiplier 1.0, authorities = dealer.
   const nvdax = Keypair.generate();
   const len = getMintLen([ExtensionType.ScaledUiAmountConfig]);

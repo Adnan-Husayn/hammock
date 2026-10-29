@@ -19,6 +19,13 @@ describe("scheduleTargets", () => {
     // 2027-01-15 Friday; Monday 2027-01-18 is closed (0118/C)
     expect(scheduleTargets("2027-01-15")).toBe("holiday");
   });
+  it("Mon-Thu input maps to that week's Friday and next Monday", () => {
+    expect(iso(scheduleTargets("2026-11-18"))).toEqual(["2026-11-20T20:59:30.000Z", "2026-11-23T14:31:30.000Z"]);
+  });
+  it("throws outside the fixture window", () => {
+    expect(() => scheduleTargets("2026-10-23")).toThrow(/window/);
+    expect(() => scheduleTargets("2027-10-01")).toThrow(/window/);
+  });
   it("rejects weekends", () => {
     expect(() => scheduleTargets("2026-11-21")).toThrow();
   });

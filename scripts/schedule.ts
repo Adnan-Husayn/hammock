@@ -3,7 +3,21 @@ import { readFileSync } from "node:fs";
 // Pyth Lazer schedule string for feed 1314 (NVDA), saved in fixtures/pyth/symbols-1314.json:
 //   "<tz>;<Mon>,<Tue>,<Wed>,<Thu>,<Fri>,<Sat>,<Sun>;<MMDD>/<hours>,..."
 // hours is "HHMM-HHMM" or "C" (closed). Overrides carry no year and recur by MMDD.
+// Overrides carry no year, so the schedule is only trustworthy in a rolling window starting at the fetch date
+// (see symbols-1314.meta.json) and lasting 11 months. Outside it we throw instead of guessing.
+// The live dealer service must refresh the schedule from the Pyth symbols endpoint; this fixture is for tests/devnet.
 const FIXTURE = new URL("../fixtures/pyth/symbols-1314.json", import.meta.url);
+const META = new URL("../fixtures/pyth/symbols-1314.meta.json", import.meta.url);
+
+function assertInWindow(dateEt: string): void {
+  const fetched = new Date(JSON.parse(readFileSync(META, "utf8")).fetchedOn + "T00:00:00Z");
+  const end = new Date(fetched);
+  end.setUTCMonth(end.getUTCMonth() + 11);
+  const d = new Date(dateEt + "T00:00:00Z");
+  if (d < fetched || d > end) {
+    throw new Error(`${dateEt} is outside the schedule window ${fetched.toISOString().slice(0, 10)}..${end.toISOString().slice(0, 10)}; refresh the schedule`);
+  }
+}
 
 export interface Targets {
   fridayTargetUtc: Date;
@@ -17,7 +31,7 @@ interface Day {
 
 export function loadSchedule(): string {
   const feeds = JSON.parse(readFileSync(FIXTURE, "utf8"));
-  return feeds[0].schedule as string;
+  return feeds.find((f: { pyth_lazer_id: number }) => f.pyth_lazer_id === 1314).schedule as string;
 }
 
 function parseHours(s: string): Day {
@@ -66,6 +80,7 @@ export function etToUtc(y: number, mo: number, d: number, h: number, mi: number,
 export function scheduleTargets(dateEt: string, schedule: string = loadSchedule()): Targets | "holiday" {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateEt);
   if (!m) throw new Error(`bad date: ${dateEt}`);
+  assertInWindow(dateEt);
   const base = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   const dow = base.getUTCDay();
   if (dow === 0 || dow === 6) throw new Error(`${dateEt} is a weekend`);
@@ -78,6 +93,7 @@ export function scheduleTargets(dateEt: string, schedule: string = loadSchedule(
   const dDate = dayInfo(schedule, +m[1], +m[2], +m[3]);
   const dFri = dayInfo(schedule, ...fri);
   const dMon = dayInfo(schedule, ...mon);
+  // A closed input day (e.g. Thanksgiving) means the caller picked a non-trading day to anchor on; refuse the week.
   if (!dDate.open || !dFri.close || !dMon.open) return "holiday";
   return {
     fridayTargetUtc: etToUtc(...fri, dFri.close[0], dFri.close[1], -30),
