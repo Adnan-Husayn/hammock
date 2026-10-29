@@ -7,3 +7,5 @@ data/*.csv
 !data/marks.csv
 data/test-*.csv
 superpowers
+keys/
+*-keypair.json
