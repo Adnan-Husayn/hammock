@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { PublicKey, SystemProgram, TransactionInstruction, SYSVAR_INSTRUCTIONS_PUBKEY } from "@solana/web3.js";
 import { createEd25519Instruction } from "@pythnetwork/pyth-lazer-solana-sdk";
-import { startHarness, warpTo, fixturePayload, createScaledMint, scheduleMultiplier, uiAmount, sendTx, failed, LAZER_PROGRAM_ID, LAZER_STORAGE, LAZER_TREASURY, TREASURY_LAMPORTS } from "./harness";
+import { startHarness, warpTo, fixturePayload, createScaledMint, scheduleMultiplier, uiAmount, sendTx, failed, SendResult, LAZER_PROGRAM_ID, LAZER_STORAGE, LAZER_TREASURY, TREASURY_LAMPORTS } from "./harness";
 
 const disc = createHash("sha256").update("global:verify_message").digest().subarray(0, 8);
 
@@ -32,6 +32,12 @@ async function sendVerify(msg: Buffer) {
   return { res, fee: after - before };
 }
 
+// Ed25519 precompile (instruction 0) fails with PrecompileError::InvalidSignature = Custom(2).
+function expectSignatureFailure(res: SendResult) {
+  expect(failed(res)).toBe(true);
+  expect(res.toString()).toContain("err: InstructionError(0, Custom(2))");
+}
+
 describe("harness", () => {
   it("harness boots under the current Node", async () => {
     const h = await startHarness();
@@ -52,8 +58,20 @@ describe("harness", () => {
   it("rejects a tampered fixture", async () => {
     const msg = Buffer.from(fixturePayload("regular-2026-10-29"));
     msg[msg.length - 20] ^= 0x01;
-    const { res } = await sendVerify(msg);
-    expect(failed(res)).toBe(true);
+    const { res, fee } = await sendVerify(msg);
+    expectSignatureFailure(res);
+    expect(fee).toBe(0n);
+  });
+
+  it("rejects a fixture whose signature bytes are corrupted but message is intact", async () => {
+    const msg = Buffer.from(fixturePayload("regular-2026-10-29"));
+    // Payload layout: magic u32 | signature [4..68) | pubkey [68..100) | len u16 | signed message [102..158).
+    // The Ed25519 instruction reads the signature from these bytes inside the verify_message instruction.
+    msg[4] ^= 0x01;
+    expect(msg.subarray(102)).toEqual(fixturePayload("regular-2026-10-29").subarray(102));
+    const { res, fee } = await sendVerify(msg);
+    expectSignatureFailure(res);
+    expect(fee).toBe(0n);
   });
 
   it("scaled mint reports multiplier 1.0 then 1.0025 after the scheduled timestamp", async () => {
