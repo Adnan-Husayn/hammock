@@ -33,8 +33,12 @@ pub mod gap_cover {
         instructions::submit_report::submit_report(ctx, leg, signed_message)
     }
 
-    pub fn finalise_friday(ctx: Context<FinaliseFriday>) -> Result<()> {
+    pub fn finalise_friday(ctx: Context<Finalise>) -> Result<()> {
         instructions::finalise::finalise_friday(ctx)
+    }
+
+    pub fn finalise_monday(ctx: Context<Finalise>) -> Result<()> {
+        instructions::finalise::finalise_monday(ctx)
     }
 
     pub fn submit_sandbox_price(ctx: Context<SubmitSandboxPrice>, leg: Leg, price: i64) -> Result<()> {

@@ -238,6 +238,62 @@
       "args": []
     },
     {
+      "name": "finalise_monday",
+      "discriminator": [
+        190,
+        173,
+        33,
+        114,
+        145,
+        251,
+        234,
+        192
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "nvdax_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "collateral_reserve",
+          "writable": true
+        },
+        {
+          "name": "bounty_reserve",
+          "writable": true
+        },
+        {
+          "name": "submitter_usdc",
+          "writable": true
+        },
+        {
+          "name": "dealer_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "buy",
       "discriminator": [
         102,
