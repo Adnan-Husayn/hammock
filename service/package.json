@@ -1,0 +1,12 @@
+{
+  "name": "gap-cover-service",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "vitest run", "start": "node --experimental-strip-types src/main.ts" },
+  "dependencies": {
+    "@pythnetwork/pyth-lazer-solana-sdk": "^0.2.2",
+    "@solana/web3.js": "^1.99.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": { "typescript": "^5.9.3", "vitest": "^5.0.5" }
+}
