@@ -16,6 +16,9 @@ pub const SANDBOX_SUBMISSION_WINDOW_US: i64 = 5_000_000;
 pub const QUOTE_MAX_LIFETIME_S: i64 = 90;
 pub const CLAIM_DEADLINE_S: i64 = 30 * 86_400;
 pub const MIN_CREATE_LEAD_S: i64 = 3_600;
+pub const BAND_LOWER_BPS: u16 = 100;
+pub const BAND_UPPER_BPS: u16 = 500;
+pub const BOUNTY_PER_LEG: u64 = 100_000;
 pub const CONTRACT_UNIT: u64 = 1_000_000;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, Default, InitSpace)]

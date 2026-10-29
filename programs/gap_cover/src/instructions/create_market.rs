@@ -62,14 +62,16 @@ pub struct CreateMarket<'info> {
 }
 
 fn validate(p: &MarketParams, now: i64) -> Result<()> {
+    // Spec section 6 fixes the band and the bounty for every market.
     require!(
-        p.band_lower_bps > 0 && p.band_lower_bps < p.band_upper_bps && p.band_upper_bps <= 10_000,
+        p.band_lower_bps == BAND_LOWER_BPS && p.band_upper_bps == BAND_UPPER_BPS,
         GapError::InvalidParams
     );
+    require!(p.bounty_per_leg == BOUNTY_PER_LEG, GapError::InvalidParams);
     require!(p.friday_target_ts < p.buying_close_ts, GapError::InvalidParams);
     require!(p.buying_close_ts <= p.monday_target_ts, GapError::InvalidParams);
     require!(p.friday_conf_cap_bps > 0 && p.monday_conf_cap_bps > 0, GapError::InvalidParams);
-    require!(p.min_publishers > 0 && p.max_contracts > 0 && p.bounty_per_leg > 0, GapError::InvalidParams);
+    require!(p.min_publishers > 0 && p.max_contracts > 0, GapError::InvalidParams);
     require!(p.dealer_quote_key != Pubkey::default(), GapError::InvalidParams);
     // Both targets must convert to microseconds without overflow.
     p.monday_target_ts.checked_mul(1_000_000).ok_or(GapError::InvalidParams)?;
@@ -142,8 +144,8 @@ pub fn create_market(ctx: Context<CreateMarket>, params: MarketParams) -> Result
         escrow: ctx.accounts.escrow.key(),
         collateral_reserve: ctx.accounts.collateral_reserve.key(),
         bounty_reserve: ctx.accounts.bounty_reserve.key(),
-        friday_target_ts_us: params.friday_target_ts * 1_000_000,
-        monday_target_ts_us: params.monday_target_ts * 1_000_000,
+        friday_target_ts_us: params.friday_target_ts.checked_mul(1_000_000).ok_or(GapError::Overflow)?,
+        monday_target_ts_us: params.monday_target_ts.checked_mul(1_000_000).ok_or(GapError::Overflow)?,
         buying_close_ts: params.buying_close_ts,
         band_lower_bps: params.band_lower_bps,
         band_upper_bps: params.band_upper_bps,

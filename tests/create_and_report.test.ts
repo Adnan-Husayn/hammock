@@ -190,6 +190,14 @@ describe("create_market", () => {
     expectError(r, "CreatedTooLate");
   });
 
+  it("rejects any band or bounty other than spec section 6 (100..500 bps, 100_000 per leg)", async () => {
+    const c = await setup();
+    expectError((await createMarket(c, { bandLowerBps: 101 })).r, "InvalidParams");
+    expectError((await createMarket(c, { bandUpperBps: 499 })).r, "InvalidParams");
+    expectError((await createMarket(c, { bountyPerLeg: new BN(99_999) })).r, "InvalidParams");
+    expectError((await createMarket(c, { bountyPerLeg: new BN(100_001) })).r, "InvalidParams");
+  });
+
   it("rejects an inverted or empty band", async () => {
     const c = await setup();
     expectError((await createMarket(c, { bandLowerBps: 500, bandUpperBps: 100 })).r, "InvalidParams");
@@ -251,6 +259,14 @@ describe("submit_report", () => {
     const own = createEd25519Instruction(msg, 0, 16);
     const ed = new TransactionInstruction({ programId: own.programId, keys: [], data: Buffer.concat([own.data.subarray(0, 16), msg]) });
     expectError(sendTx(c.h.context, c.h.payer, [ed, ix]), "WrongInstructionLayout");
+  });
+
+  it("fails WindowNotStarted before T", async () => {
+    const c = await setup();
+    const a = await mustCreate(c);
+    await forceFridayFinal(c, a.market);
+    await warpTo(c.h.context, MONDAY - 1);
+    expectError(await submit(c, a.market, "monday"), "WindowNotStarted");
   });
 
   it("fails WindowClosed after T + 7 min", async () => {
