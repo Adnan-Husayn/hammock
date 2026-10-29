@@ -1,0 +1,26 @@
+{
+  "address": "HzYCke4ESM4ripYknCuGu3Bk9XU3xRTmBoYkHaESMG9g",
+  "metadata": {
+    "name": "gap_cover",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Hand-maintained IDL (see README)"
+  },
+  "instructions": [
+    {
+      "name": "ping",
+      "discriminator": [
+        173,
+        0,
+        94,
+        236,
+        73,
+        133,
+        225,
+        153
+      ],
+      "accounts": [],
+      "args": []
+    }
+  ]
+}

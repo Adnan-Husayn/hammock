@@ -1,0 +1,19 @@
+[toolchain]
+anchor_version = "0.30.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+gap_cover = "HzYCke4ESM4ripYknCuGu3Bk9XU3xRTmBoYkHaESMG9g"
+
+[programs.devnet]
+gap_cover = "HzYCke4ESM4ripYknCuGu3Bk9XU3xRTmBoYkHaESMG9g"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "npx vitest run"

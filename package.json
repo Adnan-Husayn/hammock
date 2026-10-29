@@ -2,5 +2,21 @@
   "name": "monday-gap-cover",
   "private": true,
   "type": "module",
-  "dependencies": { "ws": "^8.18.0" }
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@coral-xyz/anchor": "0.30.1",
+    "@pythnetwork/pyth-lazer-solana-sdk": "^0.2.2",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
+    "litesvm": "0.3.3",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  },
+  "scripts": {
+    "build": "cargo-build-sbf --manifest-path programs/gap_cover/Cargo.toml --sbf-out-dir target/deploy",
+    "dump:lazer": "scripts/dump-lazer.sh",
+    "test": "vitest run"
+  }
 }
