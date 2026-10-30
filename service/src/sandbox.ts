@@ -1,7 +1,7 @@
 import { PublicKey, SystemProgram, Transaction, type Connection, type Keypair, type TransactionInstruction } from "@solana/web3.js";
 import {
   TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction,
-  createUpdateMultiplierDataInstruction, getAssociatedTokenAddressSync,
+  createUpdateMultiplierDataInstruction, getAssociatedTokenAddressSync, getMint, getScaledUiAmountConfig,
 } from "@solana/spl-token";
 import { readMarket as readGapMarket, type MarketInfo } from "./quote.ts";
 import type { Reference } from "./jupiter.ts";
@@ -207,7 +207,10 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
     async changeMultiplier() {
       const mint = s.nvdaxMint; // from config/devnet.json only
       const now = BigInt(Math.floor(Date.now() / 1000)) - 5n; // effective immediately
-      await send(s.conn, s.dealer, [createUpdateMultiplierDataInstruction(mint, s.dealer.publicKey, 1.01, now, [], TOKEN_2022_PROGRAM_ID)]);
+      // Must differ from the current value, or a later market sees no change and does not void.
+      const info = await getMint(s.conn, mint, "confirmed", TOKEN_2022_PROGRAM_ID);
+      const next = getScaledUiAmountConfig(info)?.newMultiplier === 1.01 ? 1.02 : 1.01;
+      await send(s.conn, s.dealer, [createUpdateMultiplierDataInstruction(mint, s.dealer.publicKey, next, now, [], TOKEN_2022_PROGRAM_ID)]);
     },
   };
 }
