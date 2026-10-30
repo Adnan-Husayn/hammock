@@ -1,10 +1,14 @@
-import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BN, BorshCoder } from "@coral-xyz/anchor";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { Ed25519Program, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { finaliseInstruction, finaliseInstructions } from "../src/chain.ts";
+import { PYTH_ENDPOINTS, corsOrigin } from "../src/config.ts";
+import { decodeMarket } from "../src/quote.ts";
 import { startService } from "../src/server.ts";
 import type { SignedUpdate } from "../src/pyth.ts";
 import { TS, premarket, regular } from "./helpers.ts";
@@ -13,14 +17,14 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const idl = JSON.parse(readFileSync(join(ROOT, "idl", "gap_cover.json"), "utf8"));
 const pk = (n: number) => new PublicKey(Buffer.alloc(32, n));
 
-async function marketBytes() {
+async function marketBytes(o: { state?: any; friday?: any } = {}) {
   return new BorshCoder(idl).accounts.encode("Market", {
     dealer: pk(9), bump: 1, vault_bump: 2, feed_id: 1314, exponent: -5, nvdax_mint: pk(10), usdc_mint: pk(11), token_program: pk(12),
     escrow: pk(13), collateral_reserve: pk(14), bounty_reserve: pk(15), friday_target_ts_us: new BN(TS.toString()), monday_target_ts_us: new BN((TS + 240_000_000_000n).toString()),
     buying_close_ts: new BN(0), band_lower_bps: 100, band_upper_bps: 500, friday_conf_cap_bps: 10, monday_conf_cap_bps: 20, min_publishers: 10,
     eligibility_half_window_us: new BN(5_000_000), submission_window_us: new BN(420_000_000), max_contracts: 200, bounty_per_leg: new BN(0),
     claim_deadline_s: new BN(0), dealer_quote_key: pk(16), quote_max_lifetime_s: new BN(90), sandbox: false, demo_authority: pk(17),
-    sandbox_mode: { Gap: {} }, creation_multiplier_bits: new BN(0), created_at: new BN(1), state: { FridayFinal: {} }, friday: null, monday: null,
+    sandbox_mode: { Gap: {} }, creation_multiplier_bits: new BN(0), created_at: new BN(1), state: o.state ?? { FridayFinal: {} }, friday: o.friday ?? null, monday: null,
     contracts_sold: 0, total_premiums: new BN(0), open_positions: 0, swept: false, payout_per_contract: new BN(0), buying_closed: false, settled_at: new BN(0),
   });
 }
@@ -128,5 +132,206 @@ describe("report stream failure at startup", () => {
     log.mockRestore();
     if (!server.listening) await new Promise((r) => server.once("listening", r));
     expect(server.listening).toBe(true);
+  });
+});
+
+describe("keeper through startService", () => {
+  const FRI_CLOSE_MS = Number(TS / 1000n) + 421_000;
+  const until = async (f: () => boolean) => {
+    for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(f()).toBe(true);
+  };
+
+  async function run(c: ReturnType<typeof setup>, opts: { state: any; friday?: any; nowMs: number; updates?: SignedUpdate[]; ref?: number; afterSend?: any }) {
+    let bytes = await marketBytes(opts);
+    const sent: Transaction[] = [];
+    const conn = {
+      getAccountInfo: async (k: PublicKey) => (k.equals(c.market) ? { owner: c.programId, data: bytes } : null),
+      getBalance: async () => 0,
+      getLatestBlockhash: async () => ({ blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: 1 }),
+      sendRawTransaction: async (raw: Buffer) => {
+        sent.push(Transaction.from(raw));
+        if (opts.afterSend) bytes = await marketBytes({ ...opts, state: opts.afterSend });
+        return "sig";
+      },
+      confirmTransaction: async () => ({ value: { err: null } }),
+    } as any;
+    const clock = { now: opts.nowMs };
+    let frame = (_: string) => {};
+    const server = await startService(c.env, {
+      conn,
+      nowMs: () => clock.now,
+      keeperIntervalMs: 5,
+      healthCheckMs: 5,
+      reference: async () => (opts.ref ? ({ price: opts.ref, roundTripBps: 1, multiplier: 1, decimals: 8 }) : null),
+      stream: (f, onFrame) => { (opts.updates ?? []).forEach(f); frame = onFrame; return () => {}; },
+    });
+    servers.push(server);
+    if (!server.listening) await new Promise((r) => server.once("listening", r));
+    return { sent, clock, frame: (u: string) => frame(u), url: `http://127.0.0.1:${(server.address() as any).port}` };
+  }
+  const CAND = { price: new BN(1), feed_ts_us: new BN(TS.toString()), submitter: pk(20) };
+  const disc = (name: string) => Buffer.from(idl.instructions.find((i: any) => i.name === name).discriminator);
+  const refs = (c: ReturnType<typeof setup>) => JSON.parse(readFileSync(c.env.FRIDAY_REFS_PATH!, "utf8"));
+
+  it("submits an archived report in the window, Ed25519 first", async () => {
+    const c = setup();
+    const r = await run(c, { state: { Created: {} }, nowMs: Number(TS / 1000n) + 3000, updates: [regular()] });
+    await until(() => r.sent.length > 0);
+    const ixs = r.sent[0].instructions;
+    expect(ixs[0].programId.equals(Ed25519Program.programId)).toBe(true);
+    expect(ixs[1].programId.equals(c.programId)).toBe(true);
+    expect(ixs[1].keys[1].pubkey.equals(c.market)).toBe(true);
+  });
+
+  it("finalises Friday after the window and hands f_x over from the keeper, not the poller", async () => {
+    const c = setup();
+    const r = await run(c, { state: { Created: {} }, friday: CAND, nowMs: FRI_CLOSE_MS, ref: 123.5, afterSend: { FridayFinal: {} } });
+    await until(() => r.sent.length > 0);
+    const fin = r.sent[0].instructions.at(-1)!;
+    expect(Buffer.from(fin.data).equals(disc("finalise_friday"))).toBe(true);
+    await until(() => existsSync(c.env.FRIDAY_REFS_PATH!));
+    expect(refs(c)[c.market.toBase58()]).toBe(123.5);
+  });
+
+  it("creates the token accounts the finalise pays into, and pays with the dealer key", async () => {
+    const c = setup();
+    const r = await run(c, { state: { Created: {} }, friday: CAND, nowMs: FRI_CLOSE_MS, afterSend: { FridayFinal: {} } });
+    await until(() => r.sent.length > 0);
+    const ixs = r.sent[0].instructions;
+    expect(ixs.map((i) => i.programId.toBase58())).toEqual([ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(), ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(), c.programId.toBase58()]);
+    const dealer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(c.env.DEALER_KEYPAIR!, "utf8"))));
+    expect(r.sent[0].feePayer!.equals(dealer.publicKey)).toBe(true);
+  });
+
+  it("records no f_x when finalising voids the market", async () => {
+    const c = setup();
+    const r = await run(c, { state: { Created: {} }, nowMs: FRI_CLOSE_MS, ref: 123.5, afterSend: { Voided: {} } });
+    await until(() => r.sent.length > 0);
+    await new Promise((res) => setTimeout(res, 50));
+    expect(existsSync(c.env.FRIDAY_REFS_PATH!)).toBe(false);
+  });
+
+  it("records f_x when it first sees FridayFinal and sends nothing before the Monday window", async () => {
+    const c = setup();
+    const r = await run(c, { state: { FridayFinal: {} }, friday: CAND, nowMs: FRI_CLOSE_MS + 1000, ref: 99 });
+    await until(() => existsSync(c.env.FRIDAY_REFS_PATH!));
+    expect(refs(c)[c.market.toBase58()]).toBe(99);
+    expect(r.sent).toHaveLength(0);
+  });
+
+  it("reports health with endpoint ages and keeper status, and no secrets", async () => {
+    const c = setup();
+    c.env.PYTH_PRO_TOKEN = "super-secret-token";
+    const r = await run(c, { state: { FridayFinal: {} }, friday: CAND, nowMs: FRI_CLOSE_MS });
+    r.frame(PYTH_ENDPOINTS[1]);
+    r.clock.now += 7000;
+    await new Promise((res) => setTimeout(res, 30));
+    const res = await fetch(`${r.url}/health`);
+    const text = await res.text();
+    expect(res.status).toBe(200);
+    const h = JSON.parse(text);
+    expect(h.endpoints).toEqual([
+      { endpoint: "pyth-lazer-0.dourolabs.app", lastFrameAgeS: null },
+      { endpoint: "pyth-lazer-1.dourolabs.app", lastFrameAgeS: 7 },
+      { endpoint: "pyth-lazer-2.dourolabs.app", lastFrameAgeS: null },
+    ]);
+    expect(h.markets[0]).toMatchObject({ market: c.market.toBase58(), state: "FridayFinal", consecutiveFailures: 0, fridayRefRecorded: false });
+    expect(text).not.toMatch(/super-secret|https?:|wss:|KEYPAIR/);
+  });
+
+  it("counts a failed tick in health and logs it once, without the RPC URL", async () => {
+    const c = setup();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const conn = { getAccountInfo: async () => { throw new Error("fetch failed https://rpc.example/?api-key=hidden"); }, getBalance: async () => 0 } as any;
+    const server = await startService(c.env, { conn, keeperIntervalMs: 5, reference: async () => null, stream: () => () => {} });
+    servers.push(server);
+    if (!server.listening) await new Promise((r) => server.once("listening", r));
+    await new Promise((res) => setTimeout(res, 60));
+    const h: any = await (await fetch(`http://127.0.0.1:${(server.address() as any).port}/health`)).json();
+    expect(h.ok).toBe(false);
+    expect(h.markets[0].consecutiveFailures).toBeGreaterThan(1);
+    const lines = log.mock.calls.flat().join("\n");
+    log.mockRestore();
+    expect(lines.match(/keeper /g)).toHaveLength(1);
+    expect(lines).not.toMatch(/api-key/);
+  });
+
+  it("logs a stream silent over 60 s near a mark at error level, once per silence", async () => {
+    const c = setup();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await run(c, { state: { FridayFinal: {} }, friday: CAND, nowMs: Number(TS / 1000n) });
+    r.frame(PYTH_ENDPOINTS[0]);
+    r.frame(PYTH_ENDPOINTS[1]);
+    r.frame(PYTH_ENDPOINTS[2]);
+    r.clock.now += 59_000;
+    await new Promise((res) => setTimeout(res, 30));
+    expect(log).not.toHaveBeenCalled();
+    r.frame(PYTH_ENDPOINTS[1]);
+    r.frame(PYTH_ENDPOINTS[2]);
+    r.clock.now += 2_000;
+    await until(() => log.mock.calls.length > 0);
+    await new Promise((res) => setTimeout(res, 30));
+    const lines = log.mock.calls.flat();
+    log.mockRestore();
+    expect(lines).toEqual(["stream pyth-lazer-0.dourolabs.app silent for 61 s within 10 minutes of a mark"]);
+  });
+
+  it("stays quiet about silence away from a mark", async () => {
+    const c = setup();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await run(c, { state: { FridayFinal: {} }, friday: CAND, nowMs: Number(TS / 1000n) + 11 * 60_000 });
+    r.clock.now += 120_000;
+    await new Promise((res) => setTimeout(res, 30));
+    const n = log.mock.calls.length;
+    log.mockRestore();
+    expect(n).toBe(0);
+  });
+});
+
+describe("CORS origin", () => {
+  it("is required in production and may not be any origin there", async () => {
+    expect(() => corsOrigin({ NODE_ENV: "production" })).toThrow(/CORS_ORIGIN/);
+    expect(() => corsOrigin({ NODE_ENV: "production", CORS_ORIGIN: "*" })).toThrow(/CORS_ORIGIN/);
+    const c = setup();
+    await expect(startService({ ...c.env, NODE_ENV: "production" })).rejects.toThrow(/CORS_ORIGIN/);
+  });
+  it("defaults to any origin elsewhere and is sent on responses", async () => {
+    expect(corsOrigin({})).toBe("*");
+    const c = setup();
+    c.env.CORS_ORIGIN = "https://app.example";
+    const url = await start(c, []);
+    const res = await fetch(`${url}/health`);
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://app.example");
+  });
+});
+
+describe("finalise transaction against the IDL", () => {
+  it.each(["friday", "monday"] as const)("%s has the IDL's discriminator, account order and flags", async (leg) => {
+    const programId = Keypair.generate().publicKey, market = Keypair.generate().publicKey, caller = Keypair.generate().publicKey;
+    const mk = decodeMarket(await marketBytes({ state: { FridayFinal: {} } }));
+    const sub = pk(30), dealer = pk(31);
+    const ix = finaliseInstruction(programId, caller, market, mk, leg, sub, dealer);
+    const def = idl.instructions.find((i: any) => i.name === `finalise_${leg}`);
+    expect([...ix.data]).toEqual(def.discriminator);
+    const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), market.toBuffer()], programId);
+    const byName: Record<string, PublicKey> = {
+      caller, market, vault_authority: vault, usdc_mint: mk.usdcMint, nvdax_mint: mk.nvdaxMint, escrow: mk.escrow,
+      collateral_reserve: mk.collateralReserve, bounty_reserve: mk.bountyReserve, submitter_usdc: sub, dealer_usdc: dealer, token_program: mk.tokenProgram,
+    };
+    expect(ix.keys.length).toBe(def.accounts.length);
+    def.accounts.forEach((a: any, i: number) => {
+      expect(ix.keys[i].pubkey.equals(byName[a.name]), a.name).toBe(true);
+      expect(ix.keys[i].isSigner, a.name).toBe(!!a.signer);
+      expect(ix.keys[i].isWritable, a.name).toBe(!!a.writable);
+    });
+  });
+
+  it("uses the dealer's account for the unread submitter slot when no candidate exists", async () => {
+    const mk = decodeMarket(await marketBytes({ state: { Created: {} } }));
+    const ixs = finaliseInstructions(Keypair.generate().publicKey, pk(40), pk(41), mk, "friday");
+    expect(ixs).toHaveLength(2);
+    const fin = ixs[1];
+    expect(fin.keys[8].pubkey.equals(fin.keys[9].pubkey)).toBe(true);
   });
 });

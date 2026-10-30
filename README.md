@@ -78,3 +78,5 @@ The Monday bell acts only on sandbox markets this service started (kept in `logs
 **Deployment behind a proxy.** Per-IP limits use the socket address by default. Set `TRUST_PROXY=1` only when the
 service sits behind a reverse proxy you control. The limits then use the first `X-Forwarded-For` hop, which a client
 can forge when no proxy is in front.
+
+See `docs/deploy-service.md` for the image, required settings and the volume for `logs/`.

@@ -151,3 +151,46 @@ describe("Keeper", () => {
     expect(s.archive.size).toBe(1);
   });
 });
+
+describe("keeper options", () => {
+  it("leaves the shared archive alone when prune is off, so one market cannot drop another's reports", async () => {
+    const archive = new Archive();
+    archive.add(upd(TS + 999_000_000_000n)); // another market's mark
+    const keeper = new Keeper(archive, new FakeChain(), () => F - 1n, { prune: false });
+    await keeper.tick("m");
+    expect(archive.size).toBe(1);
+  });
+
+  it("hands over on seeing FridayFinal and after finalising into it, never after a void", async () => {
+    const seen: string[] = [];
+    class StateChain extends FakeChain {
+      state = "Created";
+      async readMarket() { return { ...(await super.readMarket()), state: this.state }; }
+      async finalise(m: string, leg: Leg) { await super.finalise(m, leg); this.state = this.next; }
+      next = "FridayFinal";
+    }
+    const after = F + 421_000_000n;
+    const c1 = new StateChain();
+    await new Keeper(new Archive(), c1, () => after, { onFridayFinal: async (m) => void seen.push(m) }).tick("a");
+    expect(seen).toEqual(["a"]);
+    const c2 = new StateChain();
+    c2.next = "Voided";
+    await new Keeper(new Archive(), c2, () => after, { onFridayFinal: async (m) => void seen.push(m) }).tick("b");
+    expect(seen).toEqual(["a"]);
+    const c3 = new StateChain();
+    c3.state = "FridayFinal";
+    c3.finalised.friday = true;
+    await new Keeper(new Archive(), c3, () => F, { onFridayFinal: async (m) => void seen.push(m) }).tick("c");
+    expect(seen).toEqual(["a", "c"]);
+  });
+
+  it("a failed hand-over does not stop the leg's work, and is still reported", async () => {
+    class S extends FakeChain {
+      async readMarket() { return { ...(await super.readMarket()), state: "FridayFinal", finalised: { friday: true, monday: false } }; }
+    }
+    const s = new S();
+    const k = new Keeper(new Archive(), s, () => M + 421_000_000n, { onFridayFinal: async () => { throw new Error("no route"); } });
+    await expect(k.tick("m")).rejects.toThrow("no route");
+    expect(s.fins).toEqual(["monday"]);
+  });
+});

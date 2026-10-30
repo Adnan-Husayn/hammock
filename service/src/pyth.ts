@@ -140,6 +140,8 @@ export type StreamOpts = {
   idleMs?: number;
   backoffMs?: [number, number];
   makeSocket?: (url: string, token: string) => SocketLike;
+  /** Any frame from an endpoint, parsed or not. For health only. */
+  onFrame?: (url: string) => void;
 };
 
 /**
@@ -180,6 +182,7 @@ export function streamNvda(onUpdate: (u: SignedUpdate) => void, opts: StreamOpts
     ws.on("message", (b: unknown) => {
       if (ended) return;
       arm();
+      opts.onFrame?.(url);
       next = minBack; // a live socket resets the backoff
       try {
         const u = parseStreamMessage(JSON.parse(String(b)));

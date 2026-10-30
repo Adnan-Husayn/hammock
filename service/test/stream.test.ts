@@ -79,3 +79,20 @@ describe("live capture", () => {
     expect(u.publishers).toBe(14);
   });
 });
+
+describe("frame reporting", () => {
+  it("reports each endpoint's frames, including ones that parse to nothing", () => {
+    const sockets: FakeSocket[] = [];
+    const frames: string[] = [];
+    const stop = streamNvda(() => {}, {
+      endpoints: ["wss://a/x", "wss://b/x"],
+      token: "t",
+      makeSocket: () => { const s = new FakeSocket(); sockets.push(s); return s; },
+      onFrame: (u) => frames.push(u),
+    });
+    sockets[1].h.message("{}");
+    sockets[0].h.message("not json");
+    stop();
+    expect(frames).toEqual(["wss://b/x", "wss://a/x"]);
+  });
+});

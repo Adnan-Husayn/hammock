@@ -1,7 +1,11 @@
+import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY, Transaction, TransactionInstruction, type Connection } from "@solana/web3.js";
 import { createEd25519Instruction } from "@pythnetwork/pyth-lazer-solana-sdk";
 import { LAZER_PROGRAM_ID, LAZER_STORAGE, LAZER_TREASURY } from "./config.ts";
 import type { Leg } from "./archive.ts";
+import type { Chain, MarketView } from "./keeper.ts";
+import type { SignedUpdate } from "./pyth.ts";
+import { readMarket, type MarketInfo } from "./quote.ts";
 
 // submit_report data: 8 discriminator + 1 leg + 4 vec length, then the envelope.
 export const ENVELOPE_OFFSET = 13;
@@ -63,11 +67,105 @@ export async function sendSubmitReport(
   try {
     const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
     const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-    return !res.value.err;
+    // It passed preflight with these bytes, so a failure on landing is about the moment, not the report.
+    if (res.value.err) throw new Error(`submit_report failed on landing: ${JSON.stringify(res.value.err)}`);
+    return true;
   } catch (e: any) {
     // Only a report-specific rejection returns false; any other failure throws so the keeper retries.
     const logs: string[] | undefined = Array.isArray(e?.logs) ? e.logs : Array.isArray(e?.transactionLogs) ? e.transactionLogs : undefined;
     if (logs && isReportRejection(logs)) return false;
     throw e;
   }
+}
+
+const FINALISE_DISC: Record<Leg, Buffer> = {
+  friday: Buffer.from([74, 5, 224, 57, 250, 188, 201, 95]),
+  monday: Buffer.from([190, 173, 33, 114, 145, 251, 234, 192]),
+};
+
+const usdcAta = (mk: MarketInfo, owner: PublicKey) => getAssociatedTokenAddressSync(mk.usdcMint, owner, true, mk.tokenProgram);
+
+/** The finalise instruction for one leg; account order is the Finalise struct in finalise.rs. */
+export function finaliseInstruction(
+  programId: PublicKey,
+  caller: PublicKey,
+  market: PublicKey,
+  mk: MarketInfo,
+  leg: Leg,
+  submitterUsdc: PublicKey,
+  dealerUsdc: PublicKey,
+): TransactionInstruction {
+  const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), market.toBuffer()], programId);
+  const ro = (pubkey: PublicKey) => ({ pubkey, isSigner: false, isWritable: false });
+  const rw = (pubkey: PublicKey) => ({ pubkey, isSigner: false, isWritable: true });
+  return new TransactionInstruction({
+    programId,
+    data: FINALISE_DISC[leg],
+    keys: [
+      { pubkey: caller, isSigner: true, isWritable: false },
+      rw(market),
+      ro(vault),
+      ro(mk.usdcMint),
+      ro(mk.nvdaxMint),
+      rw(mk.escrow),
+      rw(mk.collateralReserve),
+      rw(mk.bountyReserve),
+      rw(submitterUsdc),
+      rw(dealerUsdc),
+      ro(mk.tokenProgram),
+    ],
+  });
+}
+
+/**
+ * Finalise with the token accounts it pays into. The bounty goes to whoever holds the candidate, who need not hold
+ * USDC yet, and a missing account must not stall settlement, so the payer creates both when absent. A leg with no
+ * candidate voids and never reads submitter_usdc; the dealer's account fills the slot.
+ */
+export function finaliseInstructions(programId: PublicKey, payer: PublicKey, market: PublicKey, mk: MarketInfo, leg: Leg): TransactionInstruction[] {
+  const candidate = leg === "friday" ? mk.friday : mk.monday;
+  const owners = candidate && !candidate.submitter.equals(mk.dealer) ? [mk.dealer, candidate.submitter] : [mk.dealer];
+  const dealerUsdc = usdcAta(mk, mk.dealer);
+  const submitterUsdc = candidate ? usdcAta(mk, candidate.submitter) : dealerUsdc;
+  return [
+    ...owners.map((o) => createAssociatedTokenAccountIdempotentInstruction(payer, usdcAta(mk, o), o, mk.usdcMint, mk.tokenProgram)),
+    finaliseInstruction(programId, payer, market, mk, leg, submitterUsdc, dealerUsdc),
+  ];
+}
+
+export function marketView(mk: MarketInfo): MarketView {
+  const e = mk.eligibility;
+  const params = (confCapBps: number) => ({ feedId: e.feedId, exponent: e.exponent, halfWindowUs: e.halfWindowUs, confCapBps, minPublishers: e.minPublishers });
+  return {
+    targetUs: { friday: e.fridayTargetUs, monday: e.mondayTargetUs },
+    params: { friday: params(e.fridayConfCapBps), monday: params(e.mondayConfCapBps) },
+    candidateFeedTsUs: { friday: mk.friday?.feedTsUs ?? null, monday: mk.monday?.feedTsUs ?? null },
+    finalised: { friday: mk.state !== "Created", monday: mk.state === "MondayFinal" || mk.state === "Voided" },
+    state: mk.state,
+  };
+}
+
+/** The keeper's chain: the given payer signs and pays for reports and finalise calls. */
+export function solanaChain(conn: Connection, programId: PublicKey, payer: Keypair): Chain {
+  const read = async (market: string) => {
+    const mk = await readMarket(conn, programId, new PublicKey(market));
+    if (!mk) throw new Error(`market ${market} not found`);
+    return mk;
+  };
+  return {
+    readMarket: async (market) => marketView(await read(market)),
+    submitReport: (market: string, leg: Leg, u: SignedUpdate) =>
+      sendSubmitReport(conn, programId, payer, new PublicKey(market), leg, Buffer.from(u.messageHex, "hex")),
+    async finalise(market, leg) {
+      const mk = await read(market);
+      const tx = new Transaction().add(...finaliseInstructions(programId, payer.publicKey, new PublicKey(market), mk, leg));
+      const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = payer.publicKey;
+      tx.sign(payer);
+      const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
+      const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      if (res.value.err) throw new Error(`finalise_${leg} failed on landing: ${JSON.stringify(res.value.err)}`);
+    },
+  };
 }

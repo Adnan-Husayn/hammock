@@ -9,6 +9,8 @@ export type MarketView = {
   candidateFeedTsUs: Record<Leg, bigint | null>;
   /** Leg already finalised on chain. */
   finalised: Record<Leg, boolean>;
+  /** On-chain state name, when the chain knows it. */
+  state?: string;
 };
 
 export interface Chain {
@@ -18,6 +20,13 @@ export interface Chain {
   finalise(market: string, leg: Leg): Promise<void>;
 }
 
+export type KeeperOptions = {
+  /** Called on each tick that finds the market in FridayFinal, including right after finalising Friday. */
+  onFridayFinal?(market: string): Promise<void>;
+  /** The shared service archive holds several markets and prunes itself; a keeper then must not. Default true. */
+  prune?: boolean;
+};
+
 export class Keeper {
   private rejected = new Set<string>();
   private submitted = new Map<string, bigint>(); // `${market}:${leg}` -> best feedTs we got accepted
@@ -25,12 +34,14 @@ export class Keeper {
   private archive: Archive;
   private chain: Chain;
   private nowUs: () => bigint;
+  private opts: KeeperOptions;
 
   // Explicit fields rather than parameter properties so `node --experimental-strip-types` can load this file.
-  constructor(archive: Archive, chain: Chain, nowUs: () => bigint) {
+  constructor(archive: Archive, chain: Chain, nowUs: () => bigint, opts: KeeperOptions = {}) {
     this.archive = archive;
     this.chain = chain;
     this.nowUs = nowUs;
+    this.opts = opts;
   }
 
   isRejected(hash: string) {
@@ -41,14 +52,24 @@ export class Keeper {
   async tick(market: string): Promise<void> {
     const view = await this.chain.readMarket(market);
     const now = this.nowUs();
-    this.archive.prune([view.targetUs.friday, view.targetUs.monday], view.params.friday.halfWindowUs);
+    if (this.opts.prune !== false) this.archive.prune([view.targetUs.friday, view.targetUs.monday], view.params.friday.halfWindowUs);
     let firstError: unknown;
+    const handOver = async (state?: string) => {
+      if (state === "FridayFinal") await this.opts.onFridayFinal?.(market);
+    };
+    try {
+      await handOver(view.state);
+    } catch (e) {
+      firstError = e;
+    }
     for (const leg of ["friday", "monday"] as Leg[]) {
       try {
         const t = view.targetUs[leg];
         if (view.finalised[leg] || now < t + SUBMIT_START_US) continue;
         if (now > t + SUBMISSION_WINDOW_US) { // finalise.rs: now > close
           await this.chain.finalise(market, leg);
+          // Quotes need f_x as soon as buying opens; finalising can also void, so read what it did.
+          if (leg === "friday") await handOver((await this.chain.readMarket(market)).state);
           continue;
         }
         await this.submitBest(market, leg, view);
@@ -76,14 +97,21 @@ export class Keeper {
     }
   }
 
-  /** Poll until stopped. */
-  run(market: string, intervalMs = 1000): () => void {
+  /** Poll until stopped. `onResult` gets null after a clean tick, or what the tick threw. */
+  run(market: string, intervalMs = 1000, onResult?: (error: unknown) => void): () => void {
     let stopped = false;
     let busy = false;
     const t = setInterval(async () => {
       if (stopped || busy) return;
       busy = true;
-      try { await this.tick(market); } catch { /* transient RPC errors retry next tick */ } finally { busy = false; }
+      try {
+        await this.tick(market);
+        onResult?.(null);
+      } catch (e) {
+        onResult?.(e); // transient RPC errors retry next tick
+      } finally {
+        busy = false;
+      }
     }, intervalMs);
     return () => { stopped = true; clearInterval(t); };
   }

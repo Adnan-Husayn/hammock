@@ -44,3 +44,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     httpPort: Number(env.SERVICE_PORT ?? 8787),
   };
 }
+
+/** The browser origin allowed to call the service. Production must name it; anywhere else defaults to any origin. */
+export function corsOrigin(env: NodeJS.ProcessEnv = process.env): string {
+  const v = env.CORS_ORIGIN?.trim();
+  if (env.NODE_ENV === "production" && (!v || v === "*")) throw new Error("CORS_ORIGIN must be set to the app origin when NODE_ENV=production");
+  return v || "*";
+}

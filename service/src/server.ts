@@ -5,7 +5,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
-import { loadConfig } from "./config.ts";
+import { solanaChain } from "./chain.ts";
+import { PYTH_ENDPOINTS, corsOrigin, loadConfig } from "./config.ts";
+import { StreamHealth, safeError } from "./health.ts";
+import { Keeper } from "./keeper.ts";
 import { nvdaxReference } from "./jupiter.ts";
 import { Freeze, loadGaps } from "./pricing.ts";
 import { Quoter, readLastNonce, readMarket, type QuoteResult } from "./quote.ts";
@@ -25,6 +28,10 @@ export type ServiceDeps = {
   trustProxy?: boolean;
   /** Signed reports kept around each mark; serves GET /archive/:market/:leg. */
   archive?: { archive: Archive; lookup: LegLookup };
+  /** Value of Access-Control-Allow-Origin. Defaults to any origin. */
+  corsOrigin?: string;
+  /** Body of GET /health; public, so it must carry no secrets. */
+  health?: () => unknown;
 };
 
 const MAX_BODY = 16 * 1024;
@@ -120,7 +127,7 @@ export function serviceServer(d: ServiceDeps): Server {
   const relayIp = new RateLimit(RELAY_PER_MINUTE_IP);
   const relayUser = new RateLimit(RELAY_PER_MINUTE_USER);
   return createServer(async (req, res: ServerResponse) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Origin", d.corsOrigin ?? "*");
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     const send = (status: number, v: unknown) => {
       res.writeHead(status, { "content-type": "application/json" });
@@ -135,6 +142,7 @@ export function serviceServer(d: ServiceDeps): Server {
         const r = await archiveResponse(d.archive.archive, d.archive.lookup, am);
         return send(r.status, r.body);
       }
+      if (route === "GET /health" && d.health) return send(200, d.health());
       switch (route) {
         case "GET /quote": {
           const market = pubkey(url.searchParams.get("market"), "market");
@@ -244,7 +252,10 @@ class FridayRefs {
 export type ServiceOverrides = {
   conn?: Connection;
   reference?: typeof nvdaxReference;
-  stream?: (onUpdate: (u: SignedUpdate) => void) => () => void;
+  stream?: (onUpdate: (u: SignedUpdate) => void, onFrame: (url: string) => void) => () => void;
+  nowMs?: () => number;
+  keeperIntervalMs?: number;
+  healthCheckMs?: number;
 };
 
 /**
@@ -283,6 +294,8 @@ function markArchive(path: string) {
 
 export async function startService(env: NodeJS.ProcessEnv = process.env, over: ServiceOverrides = {}) {
   const cfg = loadConfig(env);
+  const allowedOrigin = corsOrigin(env);
+  const nowMs = over.nowMs ?? Date.now;
   if (!cfg.programId) throw new Error("GAP_COVER_PROGRAM_ID missing");
   const programId = new PublicKey(cfg.programId);
   const devnet = JSON.parse(readFileSync(env.DEVNET_CONFIG_PATH ?? join(ROOT, "config", "devnet.json"), "utf8"));
@@ -299,28 +312,25 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   const refs = new FridayRefs(env.FRIDAY_REFS_PATH ?? join(ROOT, "logs", "friday-refs.json"));
   const realMarkets = (env.REAL_MARKETS ?? "").split(",").filter(Boolean).map((s) => new PublicKey(s));
 
-  // Reference refresh every 15 s. Real markets get f_x recorded the first time they are seen in FridayFinal.
+  const streamHealth = new StreamHealth(PYTH_ENDPOINTS, nowMs());
+  let markTargets: bigint[] = [];
   const marks = markArchive(env.ARCHIVE_PATH ?? join(ROOT, "logs", "archive.jsonl"));
   const refreshWindows = async () => {
     // A failed read keeps the old windows, so a flaky RPC never discards reports.
     const mks = await Promise.all(realMarkets.map((m) => readMarket(conn, programId, m)));
     const known = mks.filter((m) => m !== null);
+    markTargets = known.flatMap((m) => [m.eligibility.fridayTargetUs, m.eligibility.mondayTargetUs]);
     marks.setWindows(
-      known.flatMap((m) => [m.eligibility.fridayTargetUs, m.eligibility.mondayTargetUs]),
+      markTargets,
       known.reduce((h, m) => (m.eligibility.halfWindowUs > h ? m.eligibility.halfWindowUs : h), 0n),
     );
   };
   await refreshWindows().catch(() => {});
   setInterval(() => refreshWindows().catch(() => {}), 60_000).unref();
 
+  // Reference refresh every 15 s, for the freeze rule. The keepers record f_x.
   const tick = async () => {
-    const ref = await reference();
-    freeze.update(ref, Date.now());
-    for (const m of realMarkets) {
-      if (refs.get(m) !== undefined || !ref) continue;
-      const mk = await readMarket(conn, programId, m).catch(() => null);
-      if (mk?.state === "FridayFinal") refs.set(m, ref.price);
-    }
+    freeze.update(await reference(), Date.now());
   };
   await tick().catch(() => {});
   setInterval(() => tick().catch(() => {}), 15_000).unref();
@@ -364,7 +374,10 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
       params: { feedId: e.feedId, exponent: e.exponent, halfWindowUs: e.halfWindowUs, confCapBps: leg === "friday" ? e.fridayConfCapBps : e.mondayConfCapBps, minPublishers: e.minPublishers },
     };
   };
+  let health: () => unknown = () => ({ ok: false });
   const server = serviceServer({
+    corsOrigin: allowedOrigin,
+    health: () => health(),
     quoter,
     sandbox,
     relay: (raw) => relay(raw, relayCtx, feePayer),
@@ -376,14 +389,78 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   });
   let stopStream = () => {};
   try {
-    stopStream = (over.stream ?? ((f) => streamNvda(f)))((u) => marks.add(u));
+    const stream = over.stream ?? ((f, onFrame) => streamNvda(f, { onFrame }));
+    stopStream = stream((u) => marks.add(u), (url) => streamHealth.frame(url, nowMs()));
   } catch (e) {
     // Real markets need their marks archived; only a sandbox-only run may go without the stream.
     const why = e instanceof Error ? e.message : String(e);
     if (realMarkets.length > 0) throw new Error(`report stream failed with REAL_MARKETS set: ${why}`);
     console.error(`no report stream, sandbox only: ${why}`);
   }
-  server.on("close", () => stopStream());
+  // One keeper per real market, each with its own memory of rejected reports. The dealer pays their fees.
+  const keeperStatus = realMarkets.map((m) => ({ market: m.toBase58(), state: null as string | null, lastTickMs: null as number | null, lastSuccessMs: null as number | null, consecutiveFailures: 0 }));
+  const retryRefAt = new Map<string, number>();
+  const handOverFridayRef = async (market: string) => {
+    const key = new PublicKey(market);
+    if (refs.get(key) !== undefined || nowMs() < (retryRefAt.get(market) ?? 0)) return;
+    retryRefAt.set(market, nowMs() + 5_000); // the keeper ticks each second; do not hammer a quote route that is down
+    const ref = await reference();
+    if (ref) refs.set(key, ref.price);
+  };
+  const chain = solanaChain(conn, programId, dealer);
+  const stopKeepers = keeperStatus.map((status) => {
+    const tracked = {
+      ...chain,
+      async readMarket(market: string) {
+        const view = await chain.readMarket(market);
+        status.state = view.state ?? null;
+        return view;
+      },
+    };
+    let lastLogged = "";
+    return new Keeper(marks.archive, tracked, () => BigInt(nowMs()) * 1000n, { onFridayFinal: handOverFridayRef, prune: false }).run(
+      status.market,
+      over.keeperIntervalMs ?? 1000,
+      (error) => {
+        status.lastTickMs = nowMs();
+        if (error === null) {
+          status.lastSuccessMs = status.lastTickMs;
+          status.consecutiveFailures = 0;
+          lastLogged = "";
+          return;
+        }
+        status.consecutiveFailures++;
+        const why = safeError(error);
+        if (why !== lastLogged) console.error(`keeper ${status.market}: ${why}`); // once per distinct failure, not each second
+        lastLogged = why;
+      },
+    );
+  });
+  const healthTimer = setInterval(() => {
+    if (realMarkets.length > 0) for (const line of streamHealth.check(nowMs(), markTargets)) console.error(line);
+  }, over.healthCheckMs ?? 10_000);
+  healthTimer.unref();
+  health = () => {
+    const now = nowMs();
+    const age = (t: number | null) => (t === null ? null : Math.floor((now - t) / 1000));
+    return {
+      ok: keeperStatus.every((k) => k.consecutiveFailures === 0) && (realMarkets.length === 0 || streamHealth.anyFrameWithin(now, 60_000)),
+      endpoints: streamHealth.report(now),
+      markets: keeperStatus.map((k) => ({
+        market: k.market,
+        state: k.state,
+        lastTickAgeS: age(k.lastTickMs),
+        lastSuccessAgeS: age(k.lastSuccessMs),
+        consecutiveFailures: k.consecutiveFailures,
+        fridayRefRecorded: refs.get(new PublicKey(k.market)) !== undefined,
+      })),
+    };
+  };
+  server.on("close", () => {
+    stopStream();
+    stopKeepers.forEach((stop) => stop());
+    clearInterval(healthTimer);
+  });
   server.listen(cfg.httpPort, () => console.log(`dealer service on :${cfg.httpPort}`));
   return server;
 }
