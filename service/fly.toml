@@ -1,0 +1,45 @@
+app = "ambergris-moonrise-938"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  GAP_COVER_PROGRAM_ID = "HzYCke4ESM4ripYknCuGu3Bk9XU3xRTmBoYkHaESMG9g"
+  DEVNET_CONFIG_PATH = "/app/config/devnet.json"
+  DEALER_KEYPAIR = "/run/keys/dealer.json"
+  DEMO_AUTHORITY_KEYPAIR = "/run/keys/demo.json"
+  RELAY_KEYPAIR = "/run/keys/relay.json"
+  SERVICE_PORT = "8787"
+  TRUST_PROXY = "1"
+
+[[files]]
+  guest_path = "/run/keys/dealer.json"
+  secret_name = "DEALER_KEY_B64"
+
+[[files]]
+  guest_path = "/run/keys/demo.json"
+  secret_name = "DEMO_KEY_B64"
+
+[[files]]
+  guest_path = "/run/keys/relay.json"
+  secret_name = "RELAY_KEY_B64"
+
+[[files]]
+  guest_path = "/app/config/devnet.json"
+  local_path = "config/devnet.json"
+
+[mounts]
+  source = "service_logs"
+  destination = "/app/logs"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

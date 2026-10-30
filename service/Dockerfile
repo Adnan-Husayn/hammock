@@ -7,7 +7,6 @@ RUN npm ci --omit=dev
 COPY service/src ./src
 COPY service/data ./data
 RUN mkdir -p /app/logs && chown -R node:node /app/logs
-USER node
 EXPOSE 8787
-# Same command as "npm start"; node runs directly so it receives stop signals.
-CMD ["node", "--experimental-strip-types", "src/server.ts"]
+# Same command as "npm start". Volumes mount as root, so fix ownership, then drop to node; exec keeps stop signals.
+CMD ["sh", "-c", "chown -R node:node /app/logs && exec setpriv --reuid=node --regid=node --clear-groups node --experimental-strip-types src/server.ts"]
