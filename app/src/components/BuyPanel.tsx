@@ -5,6 +5,8 @@ import { buildBuyTx, fmtUsd, usdc, type MarketInfo } from "../lib/program";
 import { signAndSend } from "../lib/send";
 
 export const QUOTE_REFRESH_MS = 60_000;
+/** Refresh this long before expiry, and refuse to buy inside it, so a signature cannot land on a dead quote. */
+export const QUOTE_MARGIN_MS = 10_000;
 
 export function BuyPanel({ deps, market, info, contracts, onBought, onQuote }: {
   deps: AppDeps; market: PublicKey; info: MarketInfo; contracts: number; onBought?: () => void; onQuote?: (premiumPerContract: number) => void;
@@ -13,7 +15,9 @@ export function BuyPanel({ deps, market, info, contracts, onBought, onQuote }: {
   const [balance, setBalance] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [, setTick] = useState(0);
   const wallet = deps.wallet;
+  const now = deps.now ?? Date.now;
 
   const refresh = useCallback(async () => {
     if (!wallet || contracts <= 0) return setQuote(null);
@@ -38,10 +42,22 @@ export function BuyPanel({ deps, market, info, contracts, onBought, onQuote }: {
     return () => clearInterval(t);
   }, [refresh]);
 
+  useEffect(() => {
+    if (!quote) return;
+    const ms = quote.expiry * 1000 - QUOTE_MARGIN_MS - now();
+    if (ms <= 0) return; // already inside the margin; the regular refresh replaces it
+    const t = setTimeout(() => {
+      setTick((n) => n + 1); // re-render so the button blocks even while the refresh is in flight
+      refresh();
+    }, ms);
+    return () => clearTimeout(t);
+  }, [quote, refresh]);
+
+  const expiring = quote !== null && now() >= quote.expiry * 1000 - QUOTE_MARGIN_MS;
   const short = quote !== null && balance !== null && balance < BigInt(quote.totalPremium);
 
   const buy = async () => {
-    if (!wallet || !quote || short || busy) return;
+    if (!wallet || !quote || short || busy || now() >= quote.expiry * 1000 - QUOTE_MARGIN_MS) return;
     setBusy(true);
     setError(null);
     try {
@@ -70,9 +86,10 @@ export function BuyPanel({ deps, market, info, contracts, onBought, onQuote }: {
       {quote && (
         <p className="note">Premium = base {quote.inputs.base.toFixed(4)} + uncertainty {quote.inputs.uncertainty.toFixed(4)} + utilisation {quote.inputs.utilisation.toFixed(4)} + reserve {quote.inputs.reserve.toFixed(4)}. Move since the Friday mark: {quote.inputs.m.toFixed(4)}. Sold {quote.inputs.sold} of {quote.inputs.max}. The program checks the dealer's signature, not the fairness of this price.</p>
       )}
+      {expiring && <p className="note">Refreshing the quote</p>}
       {short && <p className="warn">Not enough USDC</p>}
       {error && <p className="warn">{error}</p>}
-      <button className="primary" disabled={!quote || short || busy} onClick={buy}>{busy ? "Waiting for wallet" : `Buy ${contracts} contracts`}</button>
+      <button className="primary" disabled={!quote || short || busy || expiring} onClick={buy}>{busy ? "Waiting for wallet" : `Buy ${contracts} contracts`}</button>
     </section>
   );
 }

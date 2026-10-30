@@ -74,7 +74,8 @@ export class Archive {
   }
 }
 
-export type LegLookup = (market: string, leg: Leg) => { targetUs: bigint; params: EligibilityParams } | undefined;
+type LegConfig = { targetUs: bigint; params: EligibilityParams } | undefined;
+export type LegLookup = (market: string, leg: Leg) => LegConfig | Promise<LegConfig>;
 
 export function serializeUpdate(u: SignedUpdate) {
   return {
@@ -90,17 +91,30 @@ export function serializeUpdate(u: SignedUpdate) {
   };
 }
 
+/** Inverse of serializeUpdate, for the on-disk archive. */
+export function deserializeUpdate(j: ReturnType<typeof serializeUpdate>): SignedUpdate {
+  return { ...j, feedTsUs: BigInt(j.feedTsUs), timestampUs: BigInt(j.timestampUs), price: BigInt(j.price), confidence: BigInt(j.confidence) };
+}
+
+export const ARCHIVE_PATH = /^\/archive\/([^/]+)\/(friday|monday)\/?$/;
+
+/** The response for a path matching ARCHIVE_PATH. */
+export async function archiveResponse(archive: Archive, lookup: LegLookup, m: RegExpExecArray): Promise<{ status: number; body: unknown }> {
+  const cfg = await lookup(decodeURIComponent(m[1]), m[2] as Leg);
+  if (!cfg) return { status: 404, body: { error: "unknown market" } };
+  return { status: 200, body: { market: m[1], leg: m[2], updates: archive.eligible(cfg.targetUs, cfg.params).map(serializeUpdate) } };
+}
+
 /** GET /archive/:market/:leg -> eligible updates, best first. Public data only; no keys. */
 export function archiveServer(archive: Archive, lookup: LegLookup): Server {
-  return createServer((req, res) => {
+  return createServer(async (req, res) => {
     const send = (code: number, body: unknown) => {
       res.writeHead(code, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify(body));
     };
-    const m = /^\/archive\/([^/]+)\/(friday|monday)\/?$/.exec((req.url ?? "").split("?")[0]);
+    const m = ARCHIVE_PATH.exec((req.url ?? "").split("?")[0]);
     if (req.method !== "GET" || !m) return send(404, { error: "not found" });
-    const cfg = lookup(decodeURIComponent(m[1]), m[2] as Leg);
-    if (!cfg) return send(404, { error: "unknown market" });
-    send(200, { market: m[1], leg: m[2], updates: archive.eligible(cfg.targetUs, cfg.params).map(serializeUpdate) });
+    const r = await archiveResponse(archive, lookup, m);
+    send(r.status, r.body);
   });
 }

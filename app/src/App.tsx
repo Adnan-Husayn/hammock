@@ -8,6 +8,11 @@ import { ProofScreen } from "./components/ProofScreen";
 import { Sandbox } from "./components/Sandbox";
 import { Settle } from "./components/Settle";
 
+/** Market buying close in New York time, for example "Sunday 17:50". */
+export const fmtEt = (ts: bigint) =>
+  new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .format(new Date(Number(ts) * 1000)).replace(",", "").replace(" at ", " ");
+
 export type Phase = "none" | "created" | "buying" | "locked" | "settled" | "voided";
 
 export function phaseOf(m: MarketInfo | null, nowMs: number): Phase {
@@ -21,7 +26,7 @@ export function phaseOf(m: MarketInfo | null, nowMs: number): Phase {
 const COPY: Record<Phase, [string, string]> = {
   none: ["No market this weekend", "A new market appears before the Friday afternoon mark."],
   created: ["Waiting for the Friday afternoon mark", "Buying starts once the Friday afternoon mark is final."],
-  buying: ["Buying now", "Buy cover until Sunday 17:50 ET."],
+  buying: ["Buying now", ""],
   locked: ["Locked", "Buying has ended. The payout is fixed at the Monday morning mark."],
   settled: ["Settled", "Both marks are final. Claim your payout below."],
   voided: ["Voided", "This market did not settle. Refund your premium below."],
@@ -42,7 +47,8 @@ export default function App({ deps, walletButton }: { deps: AppDeps; walletButto
 
   const onQuote = useCallback((p: number) => setPremium(p), []);
   const phase = phaseOf(info, (deps.now ?? Date.now)());
-  const [title, text] = COPY[phase];
+  const [title, copy] = COPY[phase];
+  const text = phase === "buying" && info ? `Buy cover until ${fmtEt(info.buyingCloseTs)} ET.` : copy;
 
   return (
     <main>
@@ -62,7 +68,7 @@ export default function App({ deps, walletButton }: { deps: AppDeps; walletButto
       {market && info && phase === "buying" && <BuyPanel deps={deps} market={market} info={info} contracts={contracts} onQuote={onQuote} />}
       {market && info && phase === "locked" && <LockedView deps={deps} market={market} info={info} />}
       {market && info && (phase === "settled" || phase === "voided") && <Settle deps={deps} market={market} info={info} />}
-      {market && info && phase === "settled" && <ProofScreen deps={deps} market={market} info={info} />}
+      {market && info && (phase === "settled" || phase === "voided") && <ProofScreen deps={deps} market={market} info={info} />}
       {sandbox && <Sandbox deps={deps} />}
     </main>
   );

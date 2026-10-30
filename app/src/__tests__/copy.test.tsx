@@ -34,7 +34,7 @@ describe("copy", () => {
     a.unmount();
     const b = render(<ProofScreen deps={d} market={pk()} info={settled} />);
     await screen.findAllByText("21");
-    for (const label of ["Signed price", "Session", "Timestamp", "Publishers", "Confidence", "Escrow at finalisation"]) {
+    for (const label of ["Signed price", "Session", "Timestamp", "Publishers", "Confidence", "Escrow at finalisation, kept for payouts"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(b.container.textContent).not.toMatch(OPEN);

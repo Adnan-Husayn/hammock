@@ -1,5 +1,7 @@
+import { ARCHIVE_PATH, Archive, archiveResponse, deserializeUpdate, serializeUpdate, type Leg, type LegLookup } from "./archive.ts";
+import { streamNvda, type SignedUpdate } from "./pyth.ts";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
@@ -21,6 +23,8 @@ export type ServiceDeps = {
   nowMs?: () => number;
   /** Behind a reverse proxy (TRUST_PROXY=1): key per-IP limits on the first X-Forwarded-For hop. Off by default. */
   trustProxy?: boolean;
+  /** Signed reports kept around each mark; serves GET /archive/:market/:leg. */
+  archive?: { archive: Archive; lookup: LegLookup };
 };
 
 const MAX_BODY = 16 * 1024;
@@ -126,6 +130,11 @@ export function serviceServer(d: ServiceDeps): Server {
       const url = new URL(req.url ?? "/", "http://x");
       const route = `${req.method} ${url.pathname}`;
       if (req.method === "OPTIONS") return void res.writeHead(204).end();
+      const am = req.method === "GET" ? ARCHIVE_PATH.exec(url.pathname) : null;
+      if (am && d.archive) {
+        const r = await archiveResponse(d.archive.archive, d.archive.lookup, am);
+        return send(r.status, r.body);
+      }
       switch (route) {
         case "GET /quote": {
           const market = pubkey(url.searchParams.get("market"), "market");
@@ -231,11 +240,45 @@ class FridayRefs {
   }
 }
 
-export async function startService(env: NodeJS.ProcessEnv = process.env) {
+/** What startService reaches the network for; tests replace these. */
+export type ServiceOverrides = {
+  conn?: Connection;
+  reference?: typeof nvdaxReference;
+  stream?: (onUpdate: (u: SignedUpdate) => void) => () => void;
+};
+
+/**
+ * Keeps the stream's reports that fall in a mark's window for a real market, on disk as well, so the proof screen
+ * survives a restart between Friday and Monday.
+ */
+function markArchive(path: string) {
+  const archive = new Archive();
+  if (existsSync(path)) {
+    for (const l of readFileSync(path, "utf8").split("\n")) if (l) archive.add(deserializeUpdate(JSON.parse(l)));
+  }
+  let targets: bigint[] = [];
+  let halfWindowUs = 0n;
+  return {
+    archive,
+    setWindows(t: bigint[], half: bigint) {
+      targets = t;
+      halfWindowUs = half;
+      archive.prune(t, half);
+    },
+    add(u: SignedUpdate) {
+      if (!targets.some((t) => (u.feedTsUs >= t ? u.feedTsUs - t : t - u.feedTsUs) <= halfWindowUs)) return;
+      if (!archive.add(u)) return;
+      mkdirSync(dirname(path), { recursive: true });
+      appendFileSync(path, JSON.stringify(serializeUpdate(u)) + "\n");
+    },
+  };
+}
+
+export async function startService(env: NodeJS.ProcessEnv = process.env, over: ServiceOverrides = {}) {
   const cfg = loadConfig(env);
   if (!cfg.programId) throw new Error("GAP_COVER_PROGRAM_ID missing");
   const programId = new PublicKey(cfg.programId);
-  const devnet = JSON.parse(readFileSync(join(ROOT, "config", "devnet.json"), "utf8"));
+  const devnet = JSON.parse(readFileSync(env.DEVNET_CONFIG_PATH ?? join(ROOT, "config", "devnet.json"), "utf8"));
   const dealer = keypairFromEnv("DEALER_KEYPAIR", env);
   const demo = keypairFromEnv("DEMO_AUTHORITY_KEYPAIR", env);
   const quoteKey = env.QUOTE_KEYPAIR ? keypairFromEnv("QUOTE_KEYPAIR", env) : dealer;
@@ -243,14 +286,28 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
   if ([dealer, demo, quoteKey].some((k) => k.publicKey.equals(feePayer.publicKey))) {
     throw new Error("RELAY_KEYPAIR must be a separate key that holds only SOL for fees");
   }
-  const conn = new Connection(cfg.rpcUrl, "confirmed");
+  const conn = over.conn ?? new Connection(cfg.rpcUrl, "confirmed");
+  const reference = over.reference ?? nvdaxReference;
   const freeze = new Freeze();
   const refs = new FridayRefs(env.FRIDAY_REFS_PATH ?? join(ROOT, "logs", "friday-refs.json"));
   const realMarkets = (env.REAL_MARKETS ?? "").split(",").filter(Boolean).map((s) => new PublicKey(s));
 
   // Reference refresh every 15 s. Real markets get f_x recorded the first time they are seen in FridayFinal.
+  const marks = markArchive(env.ARCHIVE_PATH ?? join(ROOT, "logs", "archive.jsonl"));
+  const refreshWindows = async () => {
+    // A failed read keeps the old windows, so a flaky RPC never discards reports.
+    const mks = await Promise.all(realMarkets.map((m) => readMarket(conn, programId, m)));
+    const known = mks.filter((m) => m !== null);
+    marks.setWindows(
+      known.flatMap((m) => [m.eligibility.fridayTargetUs, m.eligibility.mondayTargetUs]),
+      known.reduce((h, m) => (m.eligibility.halfWindowUs > h ? m.eligibility.halfWindowUs : h), 0n),
+    );
+  };
+  await refreshWindows().catch(() => {});
+  setInterval(() => refreshWindows().catch(() => {}), 60_000).unref();
+
   const tick = async () => {
-    const ref = await nvdaxReference();
+    const ref = await reference();
     freeze.update(ref, Date.now());
     for (const m of realMarkets) {
       if (refs.get(m) !== undefined || !ref) continue;
@@ -285,6 +342,21 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
     feePayer: feePayer.publicKey,
     isSandboxMarket: sandboxMarketCheck(conn, programId),
   };
+  const archiveLookup: LegLookup = async (market: string, leg: Leg) => {
+    let key: PublicKey;
+    try {
+      key = new PublicKey(market);
+    } catch {
+      return undefined;
+    }
+    const mk = await readMarket(conn, programId, key);
+    if (!mk) return undefined;
+    const e = mk.eligibility;
+    return {
+      targetUs: leg === "friday" ? e.fridayTargetUs : e.mondayTargetUs,
+      params: { feedId: e.feedId, exponent: e.exponent, halfWindowUs: e.halfWindowUs, confCapBps: leg === "friday" ? e.fridayConfCapBps : e.mondayConfCapBps, minPublishers: e.minPublishers },
+    };
+  };
   const server = serviceServer({
     quoter,
     sandbox,
@@ -293,7 +365,16 @@ export async function startService(env: NodeJS.ProcessEnv = process.env) {
     relayPayer: feePayer.publicKey,
     relayBalance: () => conn.getBalance(feePayer.publicKey, "confirmed"),
     trustProxy: env.TRUST_PROXY === "1" || env.TRUST_PROXY === "true",
+    archive: { archive: marks.archive, lookup: archiveLookup },
   });
+  let stopStream = () => {};
+  try {
+    stopStream = (over.stream ?? ((f) => streamNvda(f)))((u) => marks.add(u));
+  } catch (e) {
+    // Sandbox markets work without the stream; real marks then have no archive.
+    console.error(`no report stream: ${e instanceof Error ? e.message : e}`);
+  }
+  server.on("close", () => stopStream());
   server.listen(cfg.httpPort, () => console.log(`dealer service on :${cfg.httpPort}`));
   return server;
 }

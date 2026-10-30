@@ -60,6 +60,8 @@ export type MarketInfo = {
   escrow: PublicKey;
   collateralReserve: PublicKey;
   bountyReserve: PublicKey;
+  /** Fields check_eligible reads, for the archive route. */
+  eligibility: { feedId: number; exponent: number; halfWindowUs: bigint; fridayConfCapBps: number; mondayConfCapBps: number; minPublishers: number; fridayTargetUs: bigint; mondayTargetUs: bigint };
   fridayTargetTs: bigint;
   mondayTargetTs: bigint;
   buyingCloseTs: bigint;
@@ -90,6 +92,7 @@ class Reader {
   pk() { const v = new PublicKey(this.b.subarray(this.o, this.o + 32)); this.o += 32; return v; }
   u8() { return this.b.readUInt8(this.o++); }
   u16() { const v = this.b.readUInt16LE(this.o); this.o += 2; return v; }
+  i16() { const v = this.b.readInt16LE(this.o); this.o += 2; return v; }
   u32() { const v = this.b.readUInt32LE(this.o); this.o += 4; return v; }
   u64() { const v = this.b.readBigUInt64LE(this.o); this.o += 8; return v; }
   i64() { const v = this.b.readBigInt64LE(this.o); this.o += 8; return v; }
@@ -102,10 +105,14 @@ export function decodeMarket(data: Buffer): MarketInfo {
   if (!data.subarray(0, 8).equals(MARKET_DISC)) throw new Error("not a Market account");
   const r = new Reader(data);
   const dealer = r.pk();
-  r.skip(1 + 1 + 4 + 2); // bump, vault_bump, feed_id, exponent
+  r.skip(1 + 1); // bump, vault_bump
+  const feedId = r.u32(), exponent = r.i16();
   const nvdaxMint = r.pk(), usdcMint = r.pk(), tokenProgram = r.pk(), escrow = r.pk(), collateralReserve = r.pk(), bountyReserve = r.pk();
-  const fridayTargetTs = r.i64() / 1_000_000n, mondayTargetTs = r.i64() / 1_000_000n, buyingCloseTs = r.i64();
-  r.skip(2 * 5 + 8 + 8); // bands, conf caps, min publishers, half window, submission window
+  const fridayTargetUs = r.i64(), mondayTargetUs = r.i64(), buyingCloseTs = r.i64();
+  const fridayTargetTs = fridayTargetUs / 1_000_000n, mondayTargetTs = mondayTargetUs / 1_000_000n;
+  r.skip(2 * 2); // bands
+  const fridayConfCapBps = r.u16(), mondayConfCapBps = r.u16(), minPublishers = r.u16(), halfWindowUs = r.i64();
+  r.skip(8); // submission window
   const maxContracts = r.u32();
   r.skip(8 + 8); // bounty, claim deadline
   const dealerQuoteKey = r.pk();
@@ -120,6 +127,7 @@ export function decodeMarket(data: Buffer): MarketInfo {
   r.skip(1 + 8); // swept, payout
   const buyingClosed = r.bool();
   return {
+    eligibility: { feedId, exponent, halfWindowUs, fridayConfCapBps, mondayConfCapBps, minPublishers, fridayTargetUs, mondayTargetUs },
     dealer, nvdaxMint, usdcMint, tokenProgram, escrow, collateralReserve, bountyReserve, fridayTargetTs, mondayTargetTs, buyingCloseTs,
     maxContracts, dealerQuoteKey, quoteMaxLifetimeS, sandbox, demoAuthority, sandboxMode, state, friday, monday, contractsSold,
     totalPremiums, openPositions, buyingClosed,
