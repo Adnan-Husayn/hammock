@@ -1,17 +1,17 @@
 {
   "cluster": "devnet",
-  "dealer": "8BbSPQZ9co44sLRTrtfVSrVWdphGp74Re8YsBfosH9Js",
+  "dealer": "8uDE8BvqNDt7u6CZdCogvPS2CztQXt2C3PU1oBtDDZ82",
   "nvdaxTest": {
-    "mint": "8cU3F5YGx3T61Evwwuw51M863vN24tzRNTLHggzPx27V",
+    "mint": "FkNwiFzHTWL5cA2WDKmuGJQkfqcsqYMthL3Jq3pDW9Dh",
     "decimals": 8,
     "program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     "scaledUiMultiplier": 1
   },
   "usdcDemo": {
-    "mint": "J3WeJAffsB2jHJeEMVa8oKuVDAfyoCgvePwHPNC1S3uC",
+    "mint": "D4FBcrtAekxBVpfuLszzpfmiGtSeuaVgjDXFSaFcnXBJ",
     "decimals": 6,
     "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-    "dealerAta": "454bs8XYcraFHLMVwZbZVRmrsE2WQejzC7JipqYo2gZ7",
+    "dealerAta": "CWaaKWYhaJyS3vLN6Q38z8y3U5vpLsYwdBMhbkBmoBuu",
     "dealerBalance": 10000
   }
 }
