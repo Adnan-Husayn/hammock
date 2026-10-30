@@ -254,7 +254,14 @@ export type ServiceOverrides = {
 function markArchive(path: string) {
   const archive = new Archive();
   if (existsSync(path)) {
-    for (const l of readFileSync(path, "utf8").split("\n")) if (l) archive.add(deserializeUpdate(JSON.parse(l)));
+    for (const l of readFileSync(path, "utf8").split("\n")) {
+      if (!l) continue;
+      try {
+        archive.add(deserializeUpdate(JSON.parse(l)));
+      } catch {
+        console.error("skipped a corrupt archive line"); // for example a write cut short by a crash
+      }
+    }
   }
   let targets: bigint[] = [];
   let halfWindowUs = 0n;
@@ -371,8 +378,10 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   try {
     stopStream = (over.stream ?? ((f) => streamNvda(f)))((u) => marks.add(u));
   } catch (e) {
-    // Sandbox markets work without the stream; real marks then have no archive.
-    console.error(`no report stream: ${e instanceof Error ? e.message : e}`);
+    // Real markets need their marks archived; only a sandbox-only run may go without the stream.
+    const why = e instanceof Error ? e.message : String(e);
+    if (realMarkets.length > 0) throw new Error(`report stream failed with REAL_MARKETS set: ${why}`);
+    console.error(`no report stream, sandbox only: ${why}`);
   }
   server.on("close", () => stopStream());
   server.listen(cfg.httpPort, () => console.log(`dealer service on :${cfg.httpPort}`));

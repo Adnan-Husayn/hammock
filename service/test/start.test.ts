@@ -1,10 +1,10 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BN, BorshCoder } from "@coral-xyz/anchor";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startService } from "../src/server.ts";
 import type { SignedUpdate } from "../src/pyth.ts";
 import { TS, premarket, regular } from "./helpers.ts";
@@ -93,5 +93,40 @@ describe("GET /archive through startService", () => {
     const body: any = await (await fetch(`${url}/archive/${c.market.toBase58()}/friday`)).json();
     expect(body.updates).toHaveLength(0);
     expect(() => readFileSync(c.env.ARCHIVE_PATH!)).toThrow();
+  });
+
+  it("skips a corrupt archive line and keeps the good ones", async () => {
+    const c = setup();
+    const url = await start(c, [regular()]);
+    appendFileSync(c.env.ARCHIVE_PATH!, '{"hash":"cut sho\nnot json\n{}\n');
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const url2 = await start(c, []);
+    expect(log).toHaveBeenCalledTimes(3);
+    log.mockRestore();
+    const body: any = await (await fetch(`${url2}/archive/${c.market.toBase58()}/friday`)).json();
+    expect(body.updates).toHaveLength(1);
+    expect(url).not.toBe(url2);
+  });
+});
+
+describe("report stream failure at startup", () => {
+  const fail = () => { throw new Error("PYTH_PRO_TOKEN missing"); };
+  const over = { conn: { getAccountInfo: async () => null } as any, reference: async () => null, stream: fail };
+
+  it("refuses to start with real markets configured", async () => {
+    const c = setup();
+    await expect(startService(c.env, over)).rejects.toThrow(/PYTH_PRO_TOKEN missing/);
+  });
+
+  it("starts a sandbox-only run and logs it", async () => {
+    const c = setup();
+    delete c.env.REAL_MARKETS;
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await startService(c.env, over);
+    servers.push(server);
+    expect(log.mock.calls.flat().join()).toMatch(/sandbox only/);
+    log.mockRestore();
+    if (!server.listening) await new Promise((r) => server.once("listening", r));
+    expect(server.listening).toBe(true);
   });
 });
