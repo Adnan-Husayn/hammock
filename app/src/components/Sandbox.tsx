@@ -19,6 +19,7 @@ export function Sandbox({ deps }: { deps: AppDeps }) {
     setNote(null);
     try { await f(); } catch (e) { setNote(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
+  const [faucetCount, setFaucetCount] = useState(0);
   const start = (mode: "gap" | "multiplierVoid") => run(async () => {
     const r = await deps.service.startSandbox(mode);
     const m = new PublicKey(r.market);
@@ -31,6 +32,7 @@ export function Sandbox({ deps }: { deps: AppDeps }) {
     if (!deps.wallet) throw new Error("Connect a wallet first");
     await deps.service.faucet(deps.wallet.publicKey.toBase58());
     setNote("Demo USDC and NVDAx (test) sent to your wallet.");
+    setFaucetCount((n) => n + 1);
   });
   const bell = () => run(async () => {
     const r = await deps.service.bell(market!.toBase58());
@@ -50,7 +52,7 @@ export function Sandbox({ deps }: { deps: AppDeps }) {
         <button disabled={busy} onClick={() => start("multiplierVoid")}>Start in multiplier-void mode</button>
       </div>
       {note && <p className="note">{note}</p>}
-      {market && info && !rung && <BuyPanel deps={deps} market={market} info={info} contracts={200} onBought={onBought} />}
+      {market && info && !rung && <BuyPanel deps={deps} market={market} info={info} contracts={200} onBought={onBought} balanceNonce={faucetCount} />}
       {bought && !rung && <button className="primary" disabled={busy} onClick={bell}>Ring the Monday bell</button>}
       {market && info && rung && <><Settle deps={deps} market={market} info={info} /><ProofScreen deps={deps} market={market} info={info} /></>}
     </section>

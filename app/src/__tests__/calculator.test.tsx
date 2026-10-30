@@ -24,3 +24,10 @@ describe("calculator", () => {
     expect(payoutPerContract(0.08)).toBe(1);
   });
 });
+
+import { ata } from "../lib/program";
+import { PublicKey } from "@solana/web3.js";
+it("ata matches a token account that exists on devnet", () => {
+  const got = ata(new PublicKey("D4FBcrtAekxBVpfuLszzpfmiGtSeuaVgjDXFSaFcnXBJ"), new PublicKey("FXLBEHLaPRPQApBM9CjeanpqLqdVsf5rwWRTXsWoUy1L"));
+  expect(["DJxNyJN6MXuNaCJtTtAdapRV3pcDMw9NKCQPUw8PHCdZ", "5J4eEoiXk9XDi7UEhNu8mKrLzhpY1qnutubNRLeXfodg"]).toContain(got.toBase58());
+});

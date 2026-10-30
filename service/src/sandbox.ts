@@ -212,11 +212,15 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
   };
 }
 
-/** Faucet: demo USDC and a little NVDAx (test) to the judge's wallet. The dealer holds both mint authorities. */
+const FAUCET_LAMPORTS = 5_000_000;
+
+/** Faucet: a little SOL for rent, demo USDC and a little NVDAx (test) to the judge's wallet. The dealer holds both mint authorities. */
 export async function faucet(s: DevnetSetup, wallet: PublicKey, usdc = 100_000_000n, nvdax = 100_000_000n) {
   const usdcAta = getAssociatedTokenAddressSync(s.usdcMint, wallet);
   const nvdaxAta = getAssociatedTokenAddressSync(s.nvdaxMint, wallet, false, TOKEN_2022_PROGRAM_ID);
   return send(s.conn, s.dealer, [
+    // A buyer pays rent for their Position account, and a fresh judge wallet holds no SOL.
+    SystemProgram.transfer({ fromPubkey: s.dealer.publicKey, toPubkey: wallet, lamports: FAUCET_LAMPORTS }),
     createAssociatedTokenAccountIdempotentInstruction(s.dealer.publicKey, usdcAta, wallet, s.usdcMint),
     createMintToInstruction(s.usdcMint, usdcAta, s.dealer.publicKey, usdc),
     createAssociatedTokenAccountIdempotentInstruction(s.dealer.publicKey, nvdaxAta, wallet, s.nvdaxMint, TOKEN_2022_PROGRAM_ID),

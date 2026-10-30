@@ -8,8 +8,8 @@ export const QUOTE_REFRESH_MS = 60_000;
 /** Refresh this long before expiry, and refuse to buy inside it, so a signature cannot land on a dead quote. */
 export const QUOTE_MARGIN_MS = 10_000;
 
-export function BuyPanel({ deps, market, info, contracts, onBought, onQuote }: {
-  deps: AppDeps; market: PublicKey; info: MarketInfo; contracts: number; onBought?: () => void; onQuote?: (premiumPerContract: number) => void;
+export function BuyPanel({ deps, market, info, contracts, onBought, onQuote, balanceNonce }: {
+  deps: AppDeps; market: PublicKey; info: MarketInfo; contracts: number; onBought?: () => void; onQuote?: (premiumPerContract: number) => void; balanceNonce?: number;
 }) {
   const [quote, setQuote] = useState<QuoteJson | null>(null);
   const [balance, setBalance] = useState<bigint | null>(null);
@@ -35,6 +35,8 @@ export function BuyPanel({ deps, market, info, contracts, onBought, onQuote }: {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [deps, wallet, market, info, contracts, onQuote]);
+
+  useEffect(() => { if (balanceNonce) refresh(); }, [balanceNonce]); // tokens just arrived
 
   useEffect(() => {
     refresh();
