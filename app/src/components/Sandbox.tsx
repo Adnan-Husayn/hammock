@@ -40,7 +40,7 @@ export function Sandbox({ deps }: { deps: AppDeps }) {
     setInfo(await deps.chain.readMarket(market!));
     setNote(r.fallBps === null ? "The share multiplier changed, so this market is void. Refund your premium below." : `Monday morning mark: ${fmtUsd(price(BigInt(r.mondayPrice)))}, a fall of ${(r.fallBps / 100).toFixed(2)}%.`);
   });
-  const onBought = useCallback(() => setBought(true), []);
+  const onBought = useCallback(() => { setBought(true); setNote("Cover bought: 200 contracts. Now ring the Monday bell."); }, []);
 
   return (
     <section className="card" id="sandbox">
@@ -52,7 +52,7 @@ export function Sandbox({ deps }: { deps: AppDeps }) {
         <button disabled={busy} onClick={() => start("multiplierVoid")}>Start in multiplier-void mode</button>
       </div>
       {note && <p className="note">{note}</p>}
-      {market && info && !rung && <BuyPanel deps={deps} market={market} info={info} contracts={200} onBought={onBought} balanceNonce={faucetCount} />}
+      {market && info && !rung && !bought && <BuyPanel deps={deps} market={market} info={info} contracts={200} onBought={onBought} balanceNonce={faucetCount} />}
       {bought && !rung && <button className="primary" disabled={busy} onClick={bell}>Ring the Monday bell</button>}
       {market && info && rung && <><Settle deps={deps} market={market} info={info} /><ProofScreen deps={deps} market={market} info={info} /></>}
     </section>

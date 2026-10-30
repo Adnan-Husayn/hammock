@@ -10,7 +10,7 @@ function Leg({ title, c, u, sandbox }: { title: string; c: Candidate | null; u?:
       <h3>{title}</h3>
       {!c ? <p>No mark recorded.</p> : (
         <dl>
-          <dt>Signed price</dt><dd>{fmtUsd(price(c.price))}</dd>
+          <dt>{sandbox ? "Demo price" : "Signed price"}</dt><dd>{fmtUsd(price(c.price))}</dd>
           <dt>Session</dt><dd>{u?.session ?? missing}</dd>
           <dt>Timestamp</dt><dd>{fmtTimeUs(c.feedTsUs)}</dd>
           <dt>Publishers</dt><dd>{u ? String(u.publishers) : missing}</dd>
@@ -46,7 +46,7 @@ export function ProofScreen({ deps, market, info }: { deps: AppDeps; market: Pub
       </div>
       <dl>
         <dt>{escrowLabel}</dt><dd data-testid="escrow">{fmtUsd(escrow)}</dd>
-        <dt>Payout per contract</dt><dd>{fmtUsd(usdc(info.payoutPerContract))}</dd>
+        <dt>Payout per contract</dt><dd>${usdc(info.payoutPerContract).toFixed(6).replace(/0{1,4}$/, "")}</dd>
         <dt>Contracts sold</dt><dd>{info.contractsSold}</dd>
         <dt>Active positions</dt><dd>{info.activePositions}</dd>
       </dl>
