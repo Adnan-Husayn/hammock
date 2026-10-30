@@ -1,4 +1,4 @@
-import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { ACCOUNT_SIZE, createAssociatedTokenAccountIdempotentInstruction, createInitializeAccount3Instruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY, Transaction, TransactionInstruction, type Connection } from "@solana/web3.js";
 import { createEd25519Instruction } from "@pythnetwork/pyth-lazer-solana-sdk";
 import { LAZER_PROGRAM_ID, LAZER_STORAGE, LAZER_TREASURY } from "./config.ts";
@@ -118,19 +118,55 @@ export function finaliseInstruction(
 }
 
 /**
- * Finalise with the token accounts it pays into. The bounty goes to whoever holds the candidate, who need not hold
- * USDC yet, and a missing account must not stall settlement, so the payer creates both when absent. A leg with no
- * candidate voids and never reads submitter_usdc; the dealer's account fills the slot.
+ * Picks the USDC account a finalise pays `owner` through, adding what the transaction must do first. The ATA is used
+ * as it stands when it is right; a missing or closed one is created. An ATA reassigned to someone else, or otherwise
+ * unusable, cannot be repaired, so a fresh account is made in the same transaction: nobody can stall settlement by
+ * tampering with their own ATA.
  */
-export function finaliseInstructions(programId: PublicKey, payer: PublicKey, market: PublicKey, mk: MarketInfo, leg: Leg): TransactionInstruction[] {
+async function usdcAccountFor(conn: FinaliseConn, payer: PublicKey, mk: MarketInfo, owner: PublicKey) {
+  const ata = usdcAta(mk, owner);
+  const info = await conn.getAccountInfo(ata, "confirmed");
+  if (!info || info.owner.equals(SystemProgram.programId)) {
+    return { account: ata, instructions: [createAssociatedTokenAccountIdempotentInstruction(payer, ata, owner, mk.usdcMint, mk.tokenProgram)], signers: [] as Keypair[] };
+  }
+  const d = Buffer.from(info.data);
+  const usable = info.owner.equals(mk.tokenProgram) && d.length >= 64 && d.subarray(0, 32).equals(mk.usdcMint.toBuffer()) && d.subarray(32, 64).equals(owner.toBuffer());
+  if (usable) return { account: ata, instructions: [] as TransactionInstruction[], signers: [] as Keypair[] };
+  const fresh = Keypair.generate();
+  return {
+    account: fresh.publicKey,
+    signers: [fresh],
+    instructions: [
+      SystemProgram.createAccount({
+        fromPubkey: payer,
+        newAccountPubkey: fresh.publicKey,
+        space: ACCOUNT_SIZE,
+        lamports: await conn.getMinimumBalanceForRentExemption(ACCOUNT_SIZE),
+        programId: mk.tokenProgram,
+      }),
+      createInitializeAccount3Instruction(fresh.publicKey, mk.usdcMint, owner, mk.tokenProgram),
+    ],
+  };
+}
+
+export type FinaliseConn = Pick<Connection, "getAccountInfo" | "getMinimumBalanceForRentExemption">;
+
+/**
+ * Finalise with the token accounts it pays into, which the payer prepares. A leg with no candidate voids and never
+ * reads submitter_usdc, so the dealer's account fills the slot. `signers` must sign alongside the payer.
+ */
+export async function finaliseInstructions(conn: FinaliseConn, programId: PublicKey, payer: PublicKey, market: PublicKey, mk: MarketInfo, leg: Leg) {
   const candidate = leg === "friday" ? mk.friday : mk.monday;
-  const owners = candidate && !candidate.submitter.equals(mk.dealer) ? [mk.dealer, candidate.submitter] : [mk.dealer];
-  const dealerUsdc = usdcAta(mk, mk.dealer);
-  const submitterUsdc = candidate ? usdcAta(mk, candidate.submitter) : dealerUsdc;
-  return [
-    ...owners.map((o) => createAssociatedTokenAccountIdempotentInstruction(payer, usdcAta(mk, o), o, mk.usdcMint, mk.tokenProgram)),
-    finaliseInstruction(programId, payer, market, mk, leg, submitterUsdc, dealerUsdc),
-  ];
+  const dealer = await usdcAccountFor(conn, payer, mk, mk.dealer);
+  const submitter = candidate && !candidate.submitter.equals(mk.dealer) ? await usdcAccountFor(conn, payer, mk, candidate.submitter) : null;
+  return {
+    instructions: [
+      ...dealer.instructions,
+      ...(submitter?.instructions ?? []),
+      finaliseInstruction(programId, payer, market, mk, leg, submitter?.account ?? dealer.account, dealer.account),
+    ],
+    signers: [...dealer.signers, ...(submitter?.signers ?? [])],
+  };
 }
 
 export function marketView(mk: MarketInfo): MarketView {
@@ -158,11 +194,12 @@ export function solanaChain(conn: Connection, programId: PublicKey, payer: Keypa
       sendSubmitReport(conn, programId, payer, new PublicKey(market), leg, Buffer.from(u.messageHex, "hex")),
     async finalise(market, leg) {
       const mk = await read(market);
-      const tx = new Transaction().add(...finaliseInstructions(programId, payer.publicKey, new PublicKey(market), mk, leg));
+      const { instructions, signers } = await finaliseInstructions(conn, programId, payer.publicKey, new PublicKey(market), mk, leg);
+      const tx = new Transaction().add(...instructions);
       const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
       tx.feePayer = payer.publicKey;
-      tx.sign(payer);
+      tx.sign(payer, ...signers);
       const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
       const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
       if (res.value.err) throw new Error(`finalise_${leg} failed on landing: ${JSON.stringify(res.value.err)}`);

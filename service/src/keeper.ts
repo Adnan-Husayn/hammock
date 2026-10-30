@@ -22,7 +22,7 @@ export interface Chain {
 
 export type KeeperOptions = {
   /** Called on each tick that finds the market in FridayFinal, including right after finalising Friday. */
-  onFridayFinal?(market: string): Promise<void>;
+  onFridayFinal?(market: string, view: MarketView): Promise<void>;
   /** The shared service archive holds several markets and prunes itself; a keeper then must not. Default true. */
   prune?: boolean;
 };
@@ -54,11 +54,11 @@ export class Keeper {
     const now = this.nowUs();
     if (this.opts.prune !== false) this.archive.prune([view.targetUs.friday, view.targetUs.monday], view.params.friday.halfWindowUs);
     let firstError: unknown;
-    const handOver = async (state?: string) => {
-      if (state === "FridayFinal") await this.opts.onFridayFinal?.(market);
+    const handOver = async (v: MarketView) => {
+      if (v.state === "FridayFinal") await this.opts.onFridayFinal?.(market, v);
     };
     try {
-      await handOver(view.state);
+      await handOver(view);
     } catch (e) {
       firstError = e;
     }
@@ -69,7 +69,7 @@ export class Keeper {
         if (now > t + SUBMISSION_WINDOW_US) { // finalise.rs: now > close
           await this.chain.finalise(market, leg);
           // Quotes need f_x as soon as buying opens; finalising can also void, so read what it did.
-          if (leg === "friday") await handOver((await this.chain.readMarket(market)).state);
+          if (leg === "friday") await handOver(await this.chain.readMarket(market));
           continue;
         }
         await this.submitBest(market, leg, view);

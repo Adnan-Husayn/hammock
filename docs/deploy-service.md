@@ -36,7 +36,7 @@ readable by the container's `node` user, on a path outside the volume described 
 
 | Name | Required | Meaning |
 |---|---|---|
-| `CORS_ORIGIN` | Yes in production | The app's origin, for example `https://app.example`. The service refuses to start when `NODE_ENV=production` and this is unset or `*`. Elsewhere it defaults to `*` |
+| `CORS_ORIGIN` | Yes in production | The app's origin, for example `https://app.example`. The service refuses to start when `NODE_ENV=production` and this is unset or `*`. Elsewhere it defaults to `*`. `/archive` and `/health` are public and always send `*` |
 | `GAP_COVER_PROGRAM_ID` | Yes, unless in the config file | Program address |
 | `DEVNET_CONFIG_PATH` | Yes | Path to the JSON config with `usdcDemo.mint` and `nvdaxTest.mint`. The image contains no `config/` directory, so mount this file. Default `/app/config/devnet.json` |
 | `REAL_MARKETS` | For real markets | Comma-separated market addresses. Each gets a keeper. Empty means a sandbox-only run |
@@ -64,17 +64,21 @@ Mount a persistent volume at `/app/logs`, writable by the `node` user. Without o
 |---|---|
 | `archive.jsonl` | Signed reports around each mark. It backs the public archive and the keeper's next submission, and it must survive a restart between Friday and Monday |
 | `sandbox-markets.json` | Sandbox markets this service started; the Monday bell refuses any others |
-| `friday-refs.json` | The NVDAx reference f_x per market. Real-market quotes need it. If lost, it is recorded again at the then-current price, which would misprice quotes |
+| `friday-refs.json` | The NVDAx reference f_x per market. Real-market quotes need it. The keeper records it only until 15 minutes after the Friday window closes. After that, or if the file is lost late, quotes stay refused until it is restored |
 
 ## Health
 
 `GET /health` returns the age in seconds of the last frame from each Pyth endpoint and, per real market, the on-chain
 state, the age of the last keeper tick and last clean tick, the count of consecutive failed ticks, and whether f_x is
-recorded. `ok` is false when any keeper tick is failing or no endpoint has sent a frame in 60 s. It always answers
+recorded. `ok` is false when any keeper tick is failing, a market missed its f_x (`fridayRefMissed`), or no endpoint has sent a frame in 60 s. It always answers
 200, so a passing RPC failure does not restart the process; alert on `ok` rather than on the status code.
 
 An endpoint silent for more than 60 s within 10 minutes of a mark logs an error at error level, once per silence.
 Route error-level logs to an alert, as the marks are when it matters.
+
+If `fridayRefMissed` is true, the service was away or had no price route around the mark. Add the market's address
+and the NVDAx reference at the mark to `friday-refs.json`, then restart; the file is read at startup. Until then the
+market takes no real-market quotes, and an error is logged once.
 
 ## Checks after deploying
 
@@ -82,4 +86,4 @@ Route error-level logs to an alert, as the marks are when it matters.
 - `GET /archive/<market>/friday` responds.
 - `POST /relay` refuses a transaction that does not touch a sandbox market.
 - `GET /health` shows frames from all three endpoints.
-- A browser request from another origin is blocked, and one from the app works.
+- A browser request to `/quote` from another origin is blocked, and one from the app works.

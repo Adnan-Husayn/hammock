@@ -220,6 +220,40 @@ describe("keeper through startService", () => {
     expect(r.sent).toHaveLength(0);
   });
 
+  const GRACE_END_MS = FRI_CLOSE_MS - 1000 + 900_000; // window close + 15 min
+
+  it("still records f_x at the end of the grace period", async () => {
+    const c = setup();
+    await run(c, { state: { FridayFinal: {} }, friday: CAND, nowMs: GRACE_END_MS, ref: 77 });
+    await until(() => existsSync(c.env.FRIDAY_REFS_PATH!));
+    expect(refs(c)[c.market.toBase58()]).toBe(77);
+  });
+
+  it("refuses to record f_x past the grace period: logs once, shows in health, and quotes refuse", async () => {
+    const c = setup();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await run(c, { state: { FridayFinal: {} }, friday: CAND, nowMs: GRACE_END_MS + 1000, ref: 77 });
+    await until(() => log.mock.calls.length > 0);
+    await new Promise((res) => setTimeout(res, 40));
+    const lines = log.mock.calls.flat().filter((l) => /f_x/.test(String(l)));
+    log.mockRestore();
+    expect(lines).toHaveLength(1);
+    expect(existsSync(c.env.FRIDAY_REFS_PATH!)).toBe(false);
+    const h: any = await (await fetch(`${r.url}/health`)).json();
+    expect(h.ok).toBe(false);
+    expect(h.markets[0]).toMatchObject({ fridayRefRecorded: false, fridayRefMissed: true });
+  });
+
+  it("keeps an f_x recorded before the grace period ended", async () => {
+    const c = setup();
+    writeFileSync(c.env.FRIDAY_REFS_PATH!, JSON.stringify({ [c.market.toBase58()]: 50 }));
+    const r = await run(c, { state: { FridayFinal: {} }, friday: CAND, nowMs: GRACE_END_MS + 60_000, ref: 77 });
+    await new Promise((res) => setTimeout(res, 40));
+    const h: any = await (await fetch(`${r.url}/health`)).json();
+    expect(h.markets[0]).toMatchObject({ fridayRefRecorded: true, fridayRefMissed: false });
+    expect(refs(c)[c.market.toBase58()]).toBe(50);
+  });
+
   it("reports health with endpoint ages and keeper status, and no secrets", async () => {
     const c = setup();
     c.env.PYTH_PRO_TOKEN = "super-secret-token";
@@ -301,8 +335,14 @@ describe("CORS origin", () => {
     const c = setup();
     c.env.CORS_ORIGIN = "https://app.example";
     const url = await start(c, []);
-    const res = await fetch(`${url}/health`);
-    expect(res.headers.get("access-control-allow-origin")).toBe("https://app.example");
+    const origin = async (path: string, init?: RequestInit) => (await fetch(`${url}${path}`, init)).headers.get("access-control-allow-origin");
+    expect(await origin("/health")).toBe("*");
+    expect(await origin(`/archive/${c.market.toBase58()}/friday`)).toBe("*");
+    expect(await origin(`/archive/${c.market.toBase58()}/monday?x=1`, { method: "OPTIONS" })).toBe("*");
+    expect(await origin("/relay")).toBe("https://app.example");
+    expect(await origin("/quote")).toBe("https://app.example");
+    expect(await origin("/faucet", { method: "OPTIONS" })).toBe("https://app.example");
+    expect(await origin("/archive/x")).toBe("https://app.example"); // not an archive route
   });
 });
 
@@ -329,7 +369,8 @@ describe("finalise transaction against the IDL", () => {
 
   it("uses the dealer's account for the unread submitter slot when no candidate exists", async () => {
     const mk = decodeMarket(await marketBytes({ state: { Created: {} } }));
-    const ixs = finaliseInstructions(Keypair.generate().publicKey, pk(40), pk(41), mk, "friday");
+    const conn = { getAccountInfo: async () => null, getMinimumBalanceForRentExemption: async () => 1 } as any;
+    const { instructions: ixs } = await finaliseInstructions(conn, Keypair.generate().publicKey, pk(40), pk(41), mk, "friday");
     expect(ixs).toHaveLength(2);
     const fin = ixs[1];
     expect(fin.keys[8].pubkey.equals(fin.keys[9].pubkey)).toBe(true);

@@ -6,9 +6,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { solanaChain } from "./chain.ts";
-import { PYTH_ENDPOINTS, corsOrigin, loadConfig } from "./config.ts";
+import { PYTH_ENDPOINTS, SUBMISSION_WINDOW_US, corsOrigin, loadConfig } from "./config.ts";
 import { StreamHealth, safeError } from "./health.ts";
-import { Keeper } from "./keeper.ts";
+import { Keeper, type MarketView } from "./keeper.ts";
 import { nvdaxReference } from "./jupiter.ts";
 import { Freeze, loadGaps } from "./pricing.ts";
 import { Quoter, readLastNonce, readMarket, type QuoteResult } from "./quote.ts";
@@ -28,12 +28,14 @@ export type ServiceDeps = {
   trustProxy?: boolean;
   /** Signed reports kept around each mark; serves GET /archive/:market/:leg. */
   archive?: { archive: Archive; lookup: LegLookup };
-  /** Value of Access-Control-Allow-Origin. Defaults to any origin. */
+  /** Access-Control-Allow-Origin, except on /archive and /health, which allow any origin. Defaults to any origin. */
   corsOrigin?: string;
   /** Body of GET /health; public, so it must carry no secrets. */
   health?: () => unknown;
 };
 
+/** How long after the Friday window closes the keeper may still take the live price as f_x. */
+export const FRIDAY_REF_GRACE_US = 900_000_000n;
 const MAX_BODY = 16 * 1024;
 export const FAUCET_COOLDOWN_MS = 10 * 60_000;
 export const FAUCET_PER_MINUTE = 10; // all wallets together
@@ -127,7 +129,10 @@ export function serviceServer(d: ServiceDeps): Server {
   const relayIp = new RateLimit(RELAY_PER_MINUTE_IP);
   const relayUser = new RateLimit(RELAY_PER_MINUTE_USER);
   return createServer(async (req, res: ServerResponse) => {
-    res.setHeader("Access-Control-Allow-Origin", d.corsOrigin ?? "*");
+    // The archive and health are public, so any page may read them; everything else is for the app.
+    const path = (req.url ?? "/").split("?")[0];
+    const isPublic = ARCHIVE_PATH.test(path) || path === "/health";
+    res.setHeader("Access-Control-Allow-Origin", isPublic ? "*" : (d.corsOrigin ?? "*"));
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     const send = (status: number, v: unknown) => {
       res.writeHead(status, { "content-type": "application/json" });
@@ -398,11 +403,19 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     console.error(`no report stream, sandbox only: ${why}`);
   }
   // One keeper per real market, each with its own memory of rejected reports. The dealer pays their fees.
-  const keeperStatus = realMarkets.map((m) => ({ market: m.toBase58(), state: null as string | null, lastTickMs: null as number | null, lastSuccessMs: null as number | null, consecutiveFailures: 0 }));
+  const keeperStatus = realMarkets.map((m) => ({ market: m.toBase58(), state: null as string | null, lastTickMs: null as number | null, lastSuccessMs: null as number | null, consecutiveFailures: 0, fridayRefMissed: false }));
   const retryRefAt = new Map<string, number>();
-  const handOverFridayRef = async (market: string) => {
+  const handOverFridayRef = async (market: string, view: MarketView) => {
     const key = new PublicKey(market);
-    if (refs.get(key) !== undefined || nowMs() < (retryRefAt.get(market) ?? 0)) return;
+    if (refs.get(key) !== undefined) return;
+    // Too long after the mark, today's price is not f_x and would misprice quotes. Quotes refuse until one is set by hand.
+    if (BigInt(nowMs()) * 1000n > view.targetUs.friday + SUBMISSION_WINDOW_US + FRIDAY_REF_GRACE_US) {
+      const status = keeperStatus.find((k) => k.market === market)!;
+      if (!status.fridayRefMissed) console.error(`keeper ${market}: no f_x recorded within 15 minutes of the Friday mark closing; quotes stay refused`);
+      status.fridayRefMissed = true;
+      return;
+    }
+    if (nowMs() < (retryRefAt.get(market) ?? 0)) return;
     retryRefAt.set(market, nowMs() + 5_000); // the keeper ticks each second; do not hammer a quote route that is down
     const ref = await reference();
     if (ref) refs.set(key, ref.price);
@@ -444,7 +457,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     const now = nowMs();
     const age = (t: number | null) => (t === null ? null : Math.floor((now - t) / 1000));
     return {
-      ok: keeperStatus.every((k) => k.consecutiveFailures === 0) && (realMarkets.length === 0 || streamHealth.anyFrameWithin(now, 60_000)),
+      ok: keeperStatus.every((k) => k.consecutiveFailures === 0 && !k.fridayRefMissed) && (realMarkets.length === 0 || streamHealth.anyFrameWithin(now, 60_000)),
       endpoints: streamHealth.report(now),
       markets: keeperStatus.map((k) => ({
         market: k.market,
@@ -453,6 +466,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
         lastSuccessAgeS: age(k.lastSuccessMs),
         consecutiveFailures: k.consecutiveFailures,
         fridayRefRecorded: refs.get(new PublicKey(k.market)) !== undefined,
+        fridayRefMissed: k.fridayRefMissed,
       })),
     };
   };
