@@ -218,7 +218,7 @@ describe("Sandbox", () => {
     const sb: Sandbox = new Sandbox(chain, {
       reference: () => ref(200),
       recordFridayRef: () => {},
-      rng: () => { draws++; rungAtDraw = sb.bellRung(pk(42)); return 0.5; },
+      rng: () => { draws++; rungAtDraw = sb.bellRung(pk(42)); return 0.3; },
     });
     const { market: m, fridayPrice } = await sb.start("gap");
     expect(fridayPrice).toBe(20_000_000n);
@@ -232,14 +232,14 @@ describe("Sandbox", () => {
     expect(log).toEqual(["create 20000000", "monday 19500000", "finalise"]);
     await expect(sb.bell(m)).rejects.toThrow(/already rung/);
   });
-  it("picks each of 0.5%, 2.5% and 6%", async () => {
+  it("picks each of 1.5%, 2.5%, 4% and 6%", async () => {
     const seen = [];
-    for (const x of [0, 0.4, 0.99]) {
+    for (const x of [0, 0.3, 0.6, 0.99]) {
       const sb = new Sandbox(fakeChain("gap").chain, { reference: () => null, recordFridayRef: () => {}, rng: () => x });
       await sb.start("gap");
       seen.push((await sb.bell(pk(42))).fallBps);
     }
-    expect(seen).toEqual([50, 250, 600]);
+    expect(seen).toEqual([150, 250, 400, 600]);
   });
   it("multiplier-void mode changes the multiplier before the Monday price, with no fall", async () => {
     const { chain, log } = fakeChain("multiplierVoid");

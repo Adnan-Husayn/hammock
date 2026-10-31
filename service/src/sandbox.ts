@@ -1,14 +1,15 @@
-import { PublicKey, SystemProgram, Transaction, type Connection, type Keypair, type TransactionInstruction } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, Transaction, type Connection, type TransactionInstruction } from "@solana/web3.js";
 import {
   TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction,
-  createUpdateMultiplierDataInstruction, getAssociatedTokenAddressSync, getMint, getScaledUiAmountConfig,
+  createUpdateMultiplierDataInstruction, getAssociatedTokenAddressSync, ExtensionType, getMintLen,
+  createInitializeScaledUiAmountConfigInstruction, createInitializeMintInstruction,
 } from "@solana/spl-token";
 import { readMarket as readGapMarket, type MarketInfo } from "./quote.ts";
 import type { Reference } from "./jupiter.ts";
 
 export type SandboxMode = "gap" | "multiplierVoid";
 /** Monday falls a gap-mode sandbox picks from, in bps (spec section 10). */
-export const SANDBOX_FALLS_BPS = [50, 250, 600] as const;
+export const SANDBOX_FALLS_BPS = [150, 250, 400, 600] as const; // every fall pays, so a first try never shows $0
 export const SANDBOX_MAX_CONTRACTS = 200;
 /** Friday price when no NVDAx reference has ever been seen, exponent -5. */
 export const FALLBACK_FRIDAY_PRICE = 180_00000n;
@@ -20,8 +21,8 @@ export interface SandboxChain {
   /** submit_sandbox_price(Monday): closes buying on chain. */
   submitMondayPrice(market: PublicKey, price: bigint): Promise<void>;
   finaliseMonday(market: PublicKey): Promise<void>;
-  /** Change the configured NVDAx (test) mint's effective multiplier now (multiplier-void mode). Never a mint read from an account. */
-  changeMultiplier(): Promise<void>;
+  /** Change a void-mode market's own test mint now. Only called for markets this service created, so one judge cannot void another's market. */
+  changeMultiplier(mint: PublicKey): Promise<void>;
 }
 
 export type SandboxDeps = {
@@ -82,7 +83,7 @@ export class Sandbox {
       fallBps = SANDBOX_FALLS_BPS[Math.min(SANDBOX_FALLS_BPS.length - 1, Math.floor(this.rng() * SANDBOX_FALLS_BPS.length))];
       mondayPrice = (friday * BigInt(10_000 - fallBps)) / 10_000n;
     } else {
-      await this.chain.changeMultiplier();
+      await this.chain.changeMultiplier(mk.nvdaxMint);
     }
     await this.chain.submitMondayPrice(market, mondayPrice);
     await this.chain.finaliseMonday(market);
@@ -156,6 +157,18 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
         const market = PublicKey.findProgramAddressSync([Buffer.from("market"), s.dealer.publicKey.toBuffer(), i64(now)], s.programId)[0];
         if (await s.conn.getAccountInfo(market)) continue;
         const params = encodeSandboxParams(now, mode, s.quoteKey, s.demo.publicKey);
+        let nvdax = s.nvdaxMint;
+        if (mode === "multiplierVoid") { // its own mint, so ringing this bell cannot void other sandbox markets
+          const own = Keypair.generate();
+          const space = getMintLen([ExtensionType.ScaledUiAmountConfig]);
+          await send(s.conn, s.dealer, [
+            SystemProgram.createAccount({ fromPubkey: s.dealer.publicKey, newAccountPubkey: own.publicKey, space,
+              lamports: await s.conn.getMinimumBalanceForRentExemption(space), programId: TOKEN_2022_PROGRAM_ID }),
+            createInitializeScaledUiAmountConfigInstruction(own.publicKey, s.dealer.publicKey, 1.0, TOKEN_2022_PROGRAM_ID),
+            createInitializeMintInstruction(own.publicKey, 8, s.dealer.publicKey, null, TOKEN_2022_PROGRAM_ID),
+          ], [own]);
+          nvdax = own.publicKey;
+        }
         const create: TransactionInstruction = {
           programId: s.programId,
           keys: [
@@ -163,7 +176,7 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
             { pubkey: market, isSigner: false, isWritable: true },
             { pubkey: pda("vault", market), isSigner: false, isWritable: false },
             { pubkey: s.usdcMint, isSigner: false, isWritable: false },
-            { pubkey: s.nvdaxMint, isSigner: false, isWritable: false },
+            { pubkey: nvdax, isSigner: false, isWritable: false },
             { pubkey: pda("escrow", market), isSigner: false, isWritable: true },
             { pubkey: pda("collateral", market), isSigner: false, isWritable: true },
             { pubkey: pda("bounty", market), isSigner: false, isWritable: true },
@@ -182,6 +195,8 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
       await send(s.conn, s.dealer, [sandboxPrice(market, 1, price) as TransactionInstruction], [s.demo]);
     },
     async finaliseMonday(market) {
+      const mk = await readMarket(market);
+      if (!mk) throw new Error("market not found");
       const ix = {
         programId: s.programId,
         keys: [
@@ -189,7 +204,7 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
           { pubkey: market, isSigner: false, isWritable: true },
           { pubkey: pda("vault", market), isSigner: false, isWritable: false },
           { pubkey: s.usdcMint, isSigner: false, isWritable: false },
-          { pubkey: s.nvdaxMint, isSigner: false, isWritable: false },
+          { pubkey: mk.nvdaxMint, isSigner: false, isWritable: false },
           { pubkey: pda("escrow", market), isSigner: false, isWritable: true },
           { pubkey: pda("collateral", market), isSigner: false, isWritable: true },
           { pubkey: pda("bounty", market), isSigner: false, isWritable: true },
@@ -204,13 +219,9 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
         ix,
       ]);
     },
-    async changeMultiplier() {
-      const mint = s.nvdaxMint; // from config/devnet.json only
+    async changeMultiplier(mint) {
       const now = BigInt(Math.floor(Date.now() / 1000)) - 5n; // effective immediately
-      // Must differ from the current value, or a later market sees no change and does not void.
-      const info = await getMint(s.conn, mint, "confirmed", TOKEN_2022_PROGRAM_ID);
-      const next = getScaledUiAmountConfig(info)?.newMultiplier === 1.01 ? 1.02 : 1.01;
-      await send(s.conn, s.dealer, [createUpdateMultiplierDataInstruction(mint, s.dealer.publicKey, next, now, [], TOKEN_2022_PROGRAM_ID)]);
+      await send(s.conn, s.dealer, [createUpdateMultiplierDataInstruction(mint, s.dealer.publicKey, 1.01, now, [], TOKEN_2022_PROGRAM_ID)]);
     },
   };
 }

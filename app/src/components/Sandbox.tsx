@@ -37,8 +37,9 @@ export function Sandbox({ deps }: { deps: AppDeps }) {
   const bell = () => run(async () => {
     const r = await deps.service.bell(market!.toBase58());
     setRung(true);
-    setInfo(await deps.chain.readMarket(market!));
-    setNote(r.fallBps === null ? "The share multiplier changed, so this market is void. Refund your premium below." : `Monday morning mark: ${fmtUsd(price(BigInt(r.mondayPrice)))}, a fall of ${(r.fallBps / 100).toFixed(2)}%.`);
+    const settled = await deps.chain.readMarket(market!);
+    setInfo(settled);
+    setNote(settled?.state === "Voided" ? "The share multiplier changed, so this market is void. Refund your premium below." : r.fallBps === null ? "This market settled with no payout." : `Monday morning mark: ${fmtUsd(price(BigInt(r.mondayPrice)))}, a fall of ${(r.fallBps / 100).toFixed(2)}%.`);
   });
   const onBought = useCallback(() => { setBought(true); setNote("Cover bought: 200 contracts. Now ring the Monday bell."); }, []);
 
