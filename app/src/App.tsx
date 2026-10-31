@@ -53,10 +53,10 @@ export default function App({ deps, walletButton }: { deps: AppDeps; walletButto
   return (
     <main>
       <header>
-        <h1>Monday Gap Cover</h1>
+        <h1>Devnet preview</h1>
         {walletButton}
       </header>
-      <p className="lead">Keep your NVDAx over the weekend. Get USDC back if NVDA is lower on Monday morning than on Friday afternoon. Built for NVDAx holders.</p>
+      <p className="lead">Private preview on Solana devnet, with demo tokens.</p>
       {loaded && (
         <section className="card state" data-testid="state-card" data-state={phase}>
           <h2>{title}</h2>
