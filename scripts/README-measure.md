@@ -1,13 +1,13 @@
 # Mark-time logger
 
-`measure-marks.mjs` streams Pyth Pro NVDA (feed 1314, fixed_rate@200ms) for 60 s around
-two daily marks and appends one row per leg to `data/marks.csv`.
+`measure-marks.mjs` streams Pyth Pro NVDA, TSLA, SPY, AAPL, GOOGL, MSFT, META, QQQ and AMZN (fixed_rate@200ms) for 60 s
+around two daily marks and appends one row per stock per leg to `data/marks.csv`.
 
 - close leg: T = 15:59:30 ET, open leg: T = 09:31:30 ET. Capture runs T-30 s to T+30 s.
 - Run by hand: `node scripts/measure-marks.mjs [open|close]`. With no leg it picks the one due within
   10 minutes and exits on weekends. `--now` is a test mode (T = now + 30 s, writes `data/test-marks.csv`).
 - Token: `PYTH_PRO_TOKEN` in `.env` (gitignored) or the environment.
-- Columns: date,leg,target_utc,updates,session,conf_bps_p50,conf_bps_p95,conf_bps_max,publishers_min,publishers_p50,fresh_share.
+- Columns: date,symbol,feed_id,leg,target_utc,updates,session,conf_bps_p50,conf_bps_p95,conf_bps_max,publishers_min,publishers_p50,fresh_share.
   fresh = feedUpdateTimestamp equals the update timestamp; conf_bps = confidence / price * 1e4.
 
 ## Schedule (Mac on IST, no daylight saving)

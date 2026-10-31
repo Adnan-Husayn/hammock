@@ -1,2 +1,2 @@
-date,leg,target_utc,updates,session,conf_bps_p50,conf_bps_p95,conf_bps_max,publishers_min,publishers_p50,fresh_share
-2026-10-29,close,2026-10-29T19:59:30.000Z,297,regular|postMarket,1.87,3.15,4.08,14,20,1.000
+date,symbol,feed_id,leg,target_utc,updates,session,conf_bps_p50,conf_bps_p95,conf_bps_max,publishers_min,publishers_p50,fresh_share
+2026-10-29,NVDA,1314,close,2026-10-29T19:59:30.000Z,297,regular|postMarket,1.87,3.15,4.08,14,20,1.000

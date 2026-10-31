@@ -1,4 +1,4 @@
-// Logs Pyth Pro NVDA (feed 1314) quality around the two daily US mark times.
+// Logs Pyth Pro quality for the candidate stocks around the two daily US mark times.
 // Usage: node scripts/measure-marks.mjs [close|open] [--now]
 //   close = 15:59:30 ET, open = 09:31:30 ET. No leg: pick the next one within ~10 minutes.
 //   --now: test mode, T = now + 30 s, writes to data/test-marks.csv.
@@ -8,7 +8,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const HEADER = "date,leg,target_utc,updates,session,conf_bps_p50,conf_bps_p95,conf_bps_max,publishers_min,publishers_p50,fresh_share";
+const FEEDS = { 1314: "NVDA", 1435: "TSLA", 1398: "SPY", 922: "AAPL", 1163: "GOOGL", 1292: "MSFT", 1272: "META", 1363: "QQQ", 954: "AMZN" };
+const HEADER = "date,symbol,feed_id,leg,target_utc,updates,session,conf_bps_p50,conf_bps_p95,conf_bps_max,publishers_min,publishers_p50,fresh_share";
 const LEGS = { open: [9, 31, 30], close: [15, 59, 30] };
 const ENDPOINTS = [0, 1, 2].map((i) => `wss://pyth-lazer-${i}.dourolabs.app/v1/stream`);
 const args = process.argv.slice(2);
@@ -49,15 +50,15 @@ async function capture(startMs, endMs) {
       let done = false, opened = false;
       const finish = () => { if (done) return; done = true; clearTimeout(timer); try { ws.close(); } catch {} resolve(); };
       const timer = setTimeout(finish, Math.max(0, endMs - Date.now()) + 2000);
-      ws.on("open", () => { opened = true; ws.send(JSON.stringify({ type: "subscribe", subscriptionId: 1, priceFeedIds: [1314],
+      ws.on("open", () => { opened = true; ws.send(JSON.stringify({ type: "subscribe", subscriptionId: 1, priceFeedIds: Object.keys(FEEDS).map(Number),
         properties: ["price", "exponent", "confidence", "publisherCount", "marketSession", "feedUpdateTimestamp"],
         formats: [], deliveryFormat: "json", jsonBinaryEncoding: "hex", parsed: true, channel: "fixed_rate@200ms" })); });
       ws.on("message", (b) => {
         const m = JSON.parse(String(b));
         if (m.type !== "streamUpdated") { if (m.type !== "subscribed") errs.push(m.type ?? "msg"); return; }
-        const ts = BigInt(m.parsed.timestampUs), f = m.parsed.priceFeeds[0];
+        const ts = BigInt(m.parsed.timestampUs);
         if (Number(ts / 1000n) > endMs) return finish();
-        rows.push({ ts, fu: f.feedUpdateTimestamp != null ? BigInt(f.feedUpdateTimestamp) : null,
+        for (const f of m.parsed.priceFeeds) rows.push({ feed: f.priceFeedId, ts, fu: f.feedUpdateTimestamp != null ? BigInt(f.feedUpdateTimestamp) : null,
           price: Number(f.price), conf: Number(f.confidence), pubs: f.publisherCount, s: f.marketSession });
       });
       ws.on("error", (e) => errs.push(e.message));
@@ -87,20 +88,23 @@ async function main() {
   console.log(`leg=${leg} T=${new Date(T).toISOString()} capture ${new Date(startMs).toISOString()}..${new Date(endMs).toISOString()}`);
   if (startMs > Date.now()) await sleep(startMs - Date.now());
 
-  const { rows, errs } = await capture(startMs, endMs);
-  const bps = rows.filter((r) => r.price && r.conf).map((r) => (r.conf / r.price) * 1e4);
-  const sessions = [...new Set(rows.map((r) => r.s))].join("|");
+  const { rows: all, errs } = await capture(startMs, endMs);
   const f = (x) => x == null ? "" : x.toFixed(2);
-  const fresh = rows.length ? rows.filter((r) => r.fu === r.ts).length / rows.length : null;
   const p = etParts(T);
-  const line = [`${p.year}-${p.month}-${p.day}`, leg, new Date(T).toISOString(), rows.length, sessions,
-    f(q(bps, .5)), f(q(bps, .95)), f(q(bps, 1)), q(rows.map((r) => r.pubs), 0) ?? "", q(rows.map((r) => r.pubs), .5) ?? "",
-    fresh == null ? "" : fresh.toFixed(3)].join(",");
   const file = join(ROOT, "data", TEST ? "test-marks.csv" : "marks.csv");
   mkdirSync(dirname(file), { recursive: true });
   if (!existsSync(file)) appendFileSync(file, HEADER + "\n");
-  appendFileSync(file, line + "\n");
-  console.log(line);
+  for (const [id, symbol] of Object.entries(FEEDS)) {
+    const rows = all.filter((r) => r.feed === Number(id));
+    const bps = rows.filter((r) => r.price && r.conf).map((r) => (r.conf / r.price) * 1e4);
+    const sessions = [...new Set(rows.map((r) => r.s))].join("|");
+    const fresh = rows.length ? rows.filter((r) => r.fu === r.ts).length / rows.length : null;
+    const line = [`${p.year}-${p.month}-${p.day}`, symbol, id, leg, new Date(T).toISOString(), rows.length, sessions,
+      f(q(bps, .5)), f(q(bps, .95)), f(q(bps, 1)), q(rows.map((r) => r.pubs), 0) ?? "", q(rows.map((r) => r.pubs), .5) ?? "",
+      fresh == null ? "" : fresh.toFixed(3)].join(",");
+    appendFileSync(file, line + "\n");
+    console.log(line);
+  }
   if (errs.length) console.log("notes:", [...new Set(errs)].slice(0, 3).join("; "));
 }
 main().catch((e) => { console.error(String(e.message ?? e).replace(/Bearer\s+\S+/g, "Bearer ***")); process.exit(1); });
