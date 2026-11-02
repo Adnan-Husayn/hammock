@@ -65,7 +65,10 @@ index 0), `claim` or `refund`, on a sandbox market. The only other instruction a
 `SetComputeUnitLimit` of at most 400_000. The relay key may not appear in any instruction, and the only signers are
 the relay key and the user.
 The relay also limits requests per IP (20 a minute) and per wallet (10 a minute) and stops co-signing when the relay
-key holds less than 0.05 SOL. The faucet allows one drip per wallet every 10 minutes and 10 drips a minute overall.
+key holds less than 0.05 SOL. The faucet allows one drip per wallet every 10 minutes (kept in `logs/faucet-cooldown.json` across restarts) and
+10 drips a minute overall. Its SOL comes from a separate `FAUCET_KEYPAIR`, never the dealer key that pays the
+keeper's fees, and only to a wallet holding under 0.003 SOL, at most 0.25 SOL an hour in all. Without that key the
+faucet sends tokens only.
 The service only treats an account as a market when the gap_cover program owns it.
 
 **Sandbox multiplier-void demo.** In this mode the service changes the test mint's multiplier when the judge rings
@@ -74,6 +77,14 @@ equal to the Friday price, and `finalise_monday` voids the market so buyers can 
 The Monday bell acts only on sandbox markets this service started (kept in `logs/sandbox-markets.json`, path set by
 `SANDBOX_MARKETS_PATH`). Multiplier-void mode only ever changes the configured NVDAx (test) mint from
 `config/devnet.json`, never a mint read from an account.
+
+**Trust: the dealer can force a void on devnet.** The program checks signatures, windows and eligibility; it does
+not check that the dealer behaves fairly. On devnet the NVDAx mint is a test mint, and the dealer key holds its
+multiplier authority. A real market voids at `finalise_monday` if the mint's multiplier differs from the one at
+creation. So the dealer could watch the Monday price, and if the market would pay out, change the multiplier before
+anyone calls `finalise_monday`. The market then voids: buyers get their premiums back as refunds, not payouts. Funds
+are never lost, but the cover is only as good as the dealer's restraint. The mainnet design uses the real NVDAx
+token, whose multiplier is set by its issuer and not by the dealer, so the dealer would hold no such option there.
 
 **Deployment behind a proxy.** Per-IP limits use the socket address by default. Set `TRUST_PROXY=1` only when the
 service sits behind a reverse proxy you control. The limits then use the first `X-Forwarded-For` hop, which a client

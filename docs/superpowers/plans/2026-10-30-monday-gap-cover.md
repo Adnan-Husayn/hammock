@@ -21,7 +21,7 @@
 - Lazer verifier: program `pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt`, instruction `verify_message(message_data: bytes, ed25519_instruction_index: u16 = 0, signature_index: u8 = 0)`, accounts `payer, storage (3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL), treasury (opsLibxVY7Vz5eYMmSfX8cLFCFVYTtH6fr6MiifMpA7 on devnet; read it from storage), system_program, instructions_sysvar`.
 - No user-facing text contains the word "open" anywhere; use "Friday afternoon mark", "Monday morning mark", "buying", "active positions" (§2).
 - Devnet only. The Pyth Pro key and dealer keys never reach the browser (§11).
-- Commits carry no AI attribution trailers (owner's standing preference for public repos).
+- Commits carry no tool attribution trailers (owner's standing preference for public repos).
 - Layout: `programs/gap_cover/`, `tests/`, `service/`, `app/`, `scripts/`, `fixtures/`, `data/`.
 
 ## Review Focus
