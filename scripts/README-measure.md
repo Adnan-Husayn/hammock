@@ -24,3 +24,11 @@ Install:
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.monday-gap-cover.measure.plist
 
 Logs: `logs/measure.log`. The Mac must be awake at the start times.
+
+## Holidays and early closes
+
+The logger does not read Pyth's schedule, so it also runs on market holidays and logs at 15:59:30 ET on early-close
+days. Those rows are not real marks. Before computing the caps (plan Task 0 step 5), drop every row whose date is
+closed or early-close in `fixtures/pyth/symbols-1314.json` (`scheduleTargets` in `scripts/schedule.ts` returns
+"holiday" for a closed day). In this period that means 26 Nov 2026 (closed) and the 27 Nov 2026 close leg (early
+close at 13:00 ET, so the 15:59:30 ET row is after hours).
