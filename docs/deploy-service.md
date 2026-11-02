@@ -46,8 +46,9 @@ configs do not mount it yet. To enable it, generate a key that holds only a litt
 |---|---|---|
 | `CORS_ORIGIN` | Yes in production | The app's origin, for example `https://app.example`. The service refuses to start when `NODE_ENV=production` and this is unset or `*`. Elsewhere it defaults to `*`. `/archive` and `/health` are public and always send `*` |
 | `GAP_COVER_PROGRAM_ID` | Yes, unless in the config file | Program address |
-| `DEVNET_CONFIG_PATH` | Yes | Path to the JSON config with `usdcDemo.mint` and `nvdaxTest.mint`. The image contains no `config/` directory, so mount this file. Default `/app/config/devnet.json` |
-| `REAL_MARKETS` | For real markets | Comma-separated market addresses. Each gets a keeper. Empty means a sandbox-only run |
+| `DEVNET_CONFIG_PATH` | Yes | Path to the JSON config with `usdcDemo.mint` and `testMints.<SYM>.mint` per stock (NVDA may use the older `nvdaxTest.mint`). The image contains no `config/` directory, so mount this file. Default `/app/config/devnet.json`. A stock with no test mint is left out of the sandbox and faucet |
+| `REAL_MARKETS` | For real markets | Comma-separated market addresses, any mix of stocks. Each gets a keeper, which reads the market's feed from chain. Empty means a sandbox-only run |
+| `ENABLED_SYMBOLS` | No | Comma list of stocks to stream, price and offer, overriding the `enabled` flags in `service/src/config.ts` (default NVDA, TSLA, SPY, AAPL). A real market's stock must be in this list or its quotes are refused |
 | `TRUST_PROXY` | See below | `1` or `true` to read client addresses from `X-Forwarded-For` |
 | `SERVICE_PORT` | No | Listen port, default 8787 |
 | `ARCHIVE_PATH`, `FRIDAY_REFS_PATH`, `SANDBOX_MARKETS_PATH` | No | Override the files described below |
@@ -71,16 +72,19 @@ Before Friday (at least an hour before the Friday target, once the market exists
 1. Create the market and note the address it prints. Run the dry run first; it reads the mint and prints the
    parameters without sending:
 
-        DEALER_KEYPAIR=<dealer key> node scripts/create-real-market.ts 2026-11-06 --dry-run
-        DEALER_KEYPAIR=<dealer key> node scripts/create-real-market.ts 2026-11-06
+        DEALER_KEYPAIR=<dealer key> node scripts/create-real-market.ts NVDA 2026-11-06 --dry-run
+        DEALER_KEYPAIR=<dealer key> node scripts/create-real-market.ts NVDA 2026-11-06
 
-   It refuses holiday weeks, a Friday target less than an hour away, and a multiplier change scheduled on the NVDAx
-   mint before the Monday target. Early-close Fridays get the 12:59:30 ET target. Buying closes Sunday 17:50 ET
-   (spec section 4). Default `--max-contracts` is 5000, so the dealer needs 5000.20 demo USDC for the reserves.
+   Repeat per stock (TSLA, SPY, AAPL); each gets its own address for the same weekend. The feed id, caps and
+   publisher minimum come from `service/src/config.ts`. It refuses holiday weeks, a Friday target less than an hour
+   away, and a multiplier change scheduled on the stock's test mint before the Monday target. Early-close Fridays get the 12:59:30 ET target. Buying closes Sunday 17:50 ET
+   (spec section 4). Default `--max-contracts` is 5000, so the dealer needs 5000.20 demo USDC per market for the
+   reserves (20000.80 for four stocks; `create-test-mints.ts` mints only 10000, so mint more or lower
+   `--max-contracts`).
    Set `QUOTE_PUBKEY` if the service signs quotes with `QUOTE_KEYPAIR`; it defaults to the dealer key.
 2. From the repository root:
 
-        fly deploy -c service/fly.real.toml -e REAL_MARKETS=<market address>
+        fly deploy -c service/fly.real.toml -e REAL_MARKETS=<nvda market>,<tsla market>,<spy market>,<aapl market>
 
 3. Check `fly machine list` shows one machine `started`, and `fly logs` shows no `AUTO_STOP_MACHINES` error.
 4. `GET /health` shows the market and frames from the endpoints.
@@ -91,6 +95,30 @@ After settlement (the market is `Settled` or `Voided` on chain and claims are op
 
 This returns to stop-when-idle with no real markets. An external uptime ping on `/health` from 15 minutes before each
 mark is a cheap second guard.
+
+## Multi-market upgrade: deploy order
+
+The multi-market build changes `create_market` (new `feed_id` and `exponent` parameters, market address seeds
+`["market", dealer, feed_id, friday_target_ts]`). The `Market` account layout is unchanged. Deploy in this order:
+
+1. Program upgrade. Tag the single-feed commit first as the known-good fallback. Then `npm run build` and upgrade
+   the program in place (same program id): `scripts/deploy-devnet.sh`, or
+   `solana program deploy target/deploy/gap_cover.so --program-id target/deploy/gap_cover-keypair.json`.
+   If the new binary is larger than the program account, run `solana program extend <program id> <bytes>` first.
+   The single-feed service cannot create markets against the upgraded program, so do steps 1 to 3 together, outside
+   a real weekend.
+2. Test mints. `node scripts/create-test-mints.ts --dry-run`, then without `--dry-run`. It keeps the existing USDC
+   and NVDA mints and adds `testMints` for TSLA, SPY and AAPL in `config/devnet.json`. Update the mounted copy of
+   that file on the host.
+3. Service. Deploy the new image (`fly deploy -c service/fly.toml` for sandbox only). Check `GET /markets` lists the
+   four stocks and `GET /health` shows frames.
+4. App. Build and deploy with `VITE_SYMBOLS` and, for a real weekend, `VITE_MARKETS`.
+5. Real weekend: create one market per stock (above) and deploy with `fly.real.toml` and all addresses in
+   `REAL_MARKETS`.
+
+Markets created by the single-feed build are left behind. They keep working for claims, refunds and sweeps, since
+those act on the given market account; the new service still reads them (their feed is NVDA). Old sandbox markets
+are not migrated.
 
 ## Alerts
 
@@ -118,7 +146,7 @@ Mount a persistent volume at `/app/logs`, writable by the `node` user. Without o
 |---|---|
 | `archive.jsonl` | Signed reports around each mark. It backs the public archive and the keeper's next submission, and it must survive a restart between Friday and Monday |
 | `sandbox-markets.json` | Sandbox markets this service started; the Monday bell refuses any others |
-| `friday-refs.json` | The NVDAx reference f_x per market. Real-market quotes need it. The keeper records it only until 15 minutes after the Friday window closes. After that, or if the file is lost late, quotes stay refused until it is restored |
+| `friday-refs.json` | The stock token's reference f_x per market. Real-market quotes need it. The keeper records it only until 15 minutes after the Friday window closes. After that, or if the file is lost late, quotes stay refused until it is restored |
 
 ## Health
 
@@ -131,7 +159,7 @@ An endpoint silent for more than 60 s within 10 minutes of a mark logs an error 
 Route error-level logs to an alert, as the marks are when it matters.
 
 If `fridayRefMissed` is true, the service was away or had no price route around the mark. Add the market's address
-and the NVDAx reference at the mark to `friday-refs.json`. The keeper re-reads the file within a second and
+and its stock token's reference at the mark to `friday-refs.json`. The keeper re-reads the file within a second and
 `fridayRefMissed` clears; no restart is needed. Until then the market takes no real-market quotes, and an error is
 logged once.
 

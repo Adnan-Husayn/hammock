@@ -43,20 +43,49 @@ Anchor 0.30.1 with the Solana platform tools (cargo 1.84) needs some lockfile pi
 (anchor-syn 0.30.1 and proc-macro2 / ark-ff-macros incompatibilities). The IDL is therefore
 kept by hand in `idl/gap_cover.json`; update it whenever an instruction changes.
 
+## Multi-market
+
+One program, one dealer service and one app cover several stocks. Each market names its Pyth Pro feed at creation:
+
+- `create_market` takes `feed_id` (non-zero) and `exponent` (must be -5, the exponent of every
+  `Equity.US.<SYM>/USD` feed) in `MarketParams`, next to the per-leg confidence caps (1..200 bps) and the
+  publisher minimum (1..64). Band (100/500 bps), bounty, windows and everything else are unchanged.
+- The market address is the PDA `["market", dealer, feed_id u32 LE, friday_target_ts i64 LE]`, so NVDA, TSLA, SPY
+  and AAPL markets can share one weekend. A report for one feed is rejected (`WrongFeed`) on another feed's market.
+- Only `create_market` derives the market address. Claims, refunds and the rest act on the market account they are
+  given, so markets created by the single-feed build still settle and pay out after the upgrade.
+
+Stocks are listed in `service/src/config.ts` (`MARKETS`): symbol, feed id, mainnet xStocks mint (Jupiter
+reference), gap history file, per-leg caps and minimum publishers. NVDA, TSLA, SPY and AAPL are enabled; GOOGL, MSFT,
+META, QQQ and AMZN are listed and off. `ENABLED_SYMBOLS` overrides the flags. Feed ids: NVDA 1314, TSLA 1435, SPY
+1398, AAPL 922, GOOGL 1163, MSFT 1292, META 1272, QQQ 1363, AMZN 954.
+
+The caps in `MARKETS` are provisional: plan Task 0 step 5 applied to the logger rows available on 3 Nov 2026
+(cap = max(provisional, ceil(1.5 * p95 of daily p95)), provisionals Friday 10 and Monday 20 bps). TSLA gets 16/67
+because its Monday-mark p95 was 44 bps; the others keep 10/20 among the enabled four. Recompute from
+`data/marks.csv` after five weekdays. Caps are fixed per market at creation, so a change applies to markets created
+afterwards.
+
+The service streams every enabled feed on one Pyth subscription. One signed message carries all of them, and each
+feed in it becomes its own archive entry; the archive and keeper serve a market only its own feed. The freeze rule,
+the Jupiter reference and f_x are per stock. The app shows a stock picker and names the chosen stock throughout.
+
 ## Dealer service
 
 `service/src/server.ts` serves quotes, sandbox markets, the sandbox fee-payer relay and the devnet faucet:
-`GET /quote?market&buyer&contracts`, `POST /sandbox/start {mode}`, `POST /sandbox/bell {market}`, `GET /relay`,
-`POST /relay {transaction}`, `POST /faucet {wallet}`. Keys load from file paths in `DEALER_KEYPAIR`,
+`GET /quote?market&buyer&contracts`, `GET /markets`, `POST /sandbox/start {mode, symbol}`, `POST /sandbox/bell {market}`,
+`GET /relay`, `POST /relay {transaction}`, `POST /faucet {wallet, symbol}`. `symbol` defaults to NVDA; the faucet sends
+demo USDC and that stock's test token. Keys load from file paths in `DEALER_KEYPAIR`,
 `DEMO_AUTHORITY_KEYPAIR`, `RELAY_KEYPAIR` (a separate key holding only SOL for fees) and optionally `QUOTE_KEYPAIR`.
 They are never logged or returned.
 
 The program enforces the dealer's signature on a quote, not the pricing model. Every quote response carries the
-formula inputs (NVDAx reference, Friday reference, `m`, base, uncertainty, utilisation, reserve) so the app can
+formula inputs (the stock token's reference, Friday reference, `m`, base, uncertainty, utilisation, reserve) so the app can
 show them.
 
-**Historical gaps.** `service/data/nvda-gaps.csv` holds the last 104 NVDA weekends, built by
-`node scripts/build-gaps.mjs` from free daily bars. They are a proxy: Friday regular close to Monday regular open,
+**Historical gaps.** `service/data/<sym>-gaps.csv` holds the last 104 weekends per stock (NVDA, TSLA, SPY, AAPL now),
+built by `node scripts/build-gaps.mjs NVDA TSLA SPY AAPL` from free daily bars. A stock with no gaps file is not
+priced. They are a proxy: Friday regular close to Monday regular open,
 not the 15:59:30 ET Friday and 09:31:30 ET Monday marks the program settles on.
 
 **Relay rules.** The relay co-signs only a legacy transaction with at most 3 instructions whose fee payer is the
@@ -75,19 +104,28 @@ The service only treats an account as a market when the gap_cover program owns i
 the Monday bell, after buying has closed, rather than right after the first sale. It then submits a Monday price
 equal to the Friday price, and `finalise_monday` voids the market so buyers can claim refunds.
 The Monday bell acts only on sandbox markets this service started (kept in `logs/sandbox-markets.json`, path set by
-`SANDBOX_MARKETS_PATH`). Multiplier-void mode only ever changes the configured NVDAx (test) mint from
-`config/devnet.json`, never a mint read from an account.
+`SANDBOX_MARKETS_PATH`). Multiplier-void mode only ever changes a fresh mint the service made for that
+sandbox market, never a mint read from an account. Test mints per stock are in `config/devnet.json` under
+`testMints` (made by `scripts/create-test-mints.ts`); NVDA falls back to the older `nvdaxTest` entry.
 
 **Trust: the dealer can force a void on devnet.** The program checks signatures, windows and eligibility; it does
-not check that the dealer behaves fairly. On devnet the NVDAx mint is a test mint, and the dealer key holds its
+not check that the dealer behaves fairly. On devnet each stock's mint is a test mint, and the dealer key holds its
 multiplier authority. A real market voids at `finalise_monday` if the mint's multiplier differs from the one at
 creation. So the dealer could watch the Monday price, and if the market would pay out, change the multiplier before
 anyone calls `finalise_monday`. The market then voids: buyers get their premiums back as refunds, not payouts. Funds
-are never lost, but the cover is only as good as the dealer's restraint. The mainnet design uses the real NVDAx
-token, whose multiplier is set by its issuer and not by the dealer, so the dealer would hold no such option there.
+are never lost, but the cover is only as good as the dealer's restraint. The mainnet design uses the real xStocks
+tokens, whose multiplier is set by its issuer and not by the dealer, so the dealer would hold no such option there.
 
 **Deployment behind a proxy.** Per-IP limits use the socket address by default. Set `TRUST_PROXY=1` only when the
 service sits behind a reverse proxy you control. The limits then use the first `X-Forwarded-For` hop, which a client
 can forge when no proxy is in front.
 
-See `docs/deploy-service.md` for the image, required settings and the volume for `logs/`.
+See `docs/deploy-service.md` for the image, required settings, the volume for `logs/` and the multi-market deploy
+order.
+
+## App settings
+
+`VITE_SYMBOLS` (comma list, default `NVDA,TSLA,SPY,AAPL`) sets the stocks in the picker. `VITE_MARKETS` maps each
+stock to this weekend's real market, for example `NVDA=<address>,TSLA=<address>`; a stock with none shows "No <SYM>
+market this weekend". The older `VITE_MARKET` still works and means NVDA. Also `VITE_SERVICE_URL`,
+`VITE_ARCHIVE_URL`, `VITE_RPC_URL`, `VITE_PROGRAM_ID`.
