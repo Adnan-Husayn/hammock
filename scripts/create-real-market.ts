@@ -3,7 +3,7 @@
 //
 // Usage (from the repository root):
 //   DEALER_KEYPAIR=~/deploy-keypair.json [QUOTE_PUBKEY=<key>] [RPC_URL=...] \
-//     node scripts/create-real-market.ts <SYMBOL> <YYYY-MM-DD> [--max-contracts 5000] [--dry-run]
+//     node scripts/create-real-market.ts <SYMBOL> <YYYY-MM-DD> [--max-contracts 1000] [--dry-run]
 //
 // SYMBOL is one of service/src/config.ts MARKETS (NVDA, TSLA, SPY, AAPL, ...); its feed id, caps and minimum
 // publishers come from there, its test mint from config/devnet.json testMints.
@@ -26,7 +26,7 @@ import {
 } from "../service/src/sandbox.ts";
 import { DEFAULT_SYMBOL, devnetTestMint, marketByFeed, marketBySymbol, type MarketConfig } from "../service/src/config.ts";
 
-export const DEFAULT_MAX_CONTRACTS = 5_000;
+export const DEFAULT_MAX_CONTRACTS = 1_000;
 /** The program's MIN_CREATE_LEAD_S is 3_600; keep a margin for the transaction to land. */
 export const CREATE_LEAD_S = 3_600 + 300;
 export const BUYING_CLOSE_ET: [number, number] = [17, 50]; // Sunday, New York time

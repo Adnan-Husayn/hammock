@@ -10,8 +10,9 @@ pub enum Leg {
 /// Every Pyth Pro US equity feed (Equity.US.<SYM>/USD) uses this exponent. The feed id and exponent are
 /// create-time market parameters; this release accepts only this exponent.
 pub const REQUIRED_EXPONENT: i16 = -5;
-/// Bounds on the per-leg confidence caps and the publisher minimum set at creation.
-pub const MAX_CONF_CAP_BPS: u16 = 200;
+/// Bounds on the per-leg confidence caps and the publisher minimum set at creation. 100 bps (1%, the lower edge of
+/// the payout band) leaves room for the widest provisional cap from the logger (TSLA Monday, 67 bps).
+pub const MAX_CONF_CAP_BPS: u16 = 100;
 pub const MAX_MIN_PUBLISHERS: u16 = 64;
 /// Fixed by spec section 6 for every market.
 pub const ELIGIBILITY_HALF_WINDOW_US: i64 = 5_000_000;

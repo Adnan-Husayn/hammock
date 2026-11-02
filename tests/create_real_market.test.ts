@@ -20,7 +20,7 @@ describe("create-real-market params", () => {
       "2026-11-06T20:59:30.000Z", "2026-11-09T14:31:30.000Z", "2026-11-08T22:50:00.000Z",
     ]);
     expect(p).toMatchObject({ sandbox: false, demoAuthority: PublicKey.default, maxContracts: DEFAULT_MAX_CONTRACTS, fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10 });
-    expect(reserveUsdc(p)).toBe(5_000_200_000n);
+    expect(reserveUsdc(p)).toBe(1_000_200_000n);
   });
 
   it("early-close Friday 27 Nov (Thanksgiving week, anchored on the Friday) uses 12:59:30 ET", () => {
@@ -86,6 +86,6 @@ describe("create-real-market params", () => {
     const def = idl.instructions.find((i: any) => i.name === "create_market");
     expect(ix.keys).toHaveLength(def.accounts.length);
     expect(ix.keys[1].pubkey.equals(market)).toBe(true);
-    expect(describeParams(p, market)).toMatchObject({ market: market.toBase58(), reserveUsdc: "5000.20", sandbox: false });
+    expect(describeParams(p, market)).toMatchObject({ market: market.toBase58(), reserveUsdc: "1000.20", sandbox: false });
   });
 });

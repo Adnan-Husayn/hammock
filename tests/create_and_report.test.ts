@@ -250,7 +250,7 @@ describe("create_market", () => {
     const c = await setup();
     expectError((await createMarket(c, { feedId: 0 })).r, "InvalidParams");
     expectError((await createMarket(c, { exponent: -6 })).r, "InvalidParams");
-    expectError((await createMarket(c, { fridayConfCapBps: 201 })).r, "InvalidParams");
+    expectError((await createMarket(c, { fridayConfCapBps: 101 })).r, "InvalidParams");
     expectError((await createMarket(c, { mondayConfCapBps: 0 })).r, "InvalidParams");
     expectError((await createMarket(c, { minPublishers: 65 })).r, "InvalidParams");
   });

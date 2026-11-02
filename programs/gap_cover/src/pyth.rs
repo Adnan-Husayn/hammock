@@ -304,6 +304,56 @@ mod tests {
         // The parser also refuses to return a feed the message does not carry.
         assert!(parse_report(&regular(), 1435).is_err());
     }
+    /// Solana-format envelope over a crafted payload. parse_report does not check the signature (Lazer does).
+    fn envelope(feeds: &[(u32, Vec<(u8, Vec<u8>)>)]) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&PAYLOAD_MAGIC.to_le_bytes());
+        p.extend_from_slice(&(TS as u64).to_le_bytes());
+        p.push(1);
+        p.push(feeds.len() as u8);
+        for (id, props) in feeds {
+            p.extend_from_slice(&id.to_le_bytes());
+            p.push(props.len() as u8);
+            for (k, v) in props {
+                p.push(*k);
+                p.extend_from_slice(v);
+            }
+        }
+        let mut e = SOLANA_FORMAT_MAGIC.to_le_bytes().to_vec();
+        e.extend_from_slice(&[0u8; 96]);
+        e.extend_from_slice(&(p.len() as u16).to_le_bytes());
+        e.extend_from_slice(&p);
+        e
+    }
+    fn full(price: i64) -> Vec<(u8, Vec<u8>)> {
+        let mut fts = vec![1u8];
+        fts.extend_from_slice(&(TS as u64).to_le_bytes());
+        vec![
+            (PROP_PRICE, price.to_le_bytes().to_vec()),
+            (PROP_PUBLISHER_COUNT, 20u16.to_le_bytes().to_vec()),
+            (PROP_EXPONENT, (-5i16).to_le_bytes().to_vec()),
+            (PROP_CONFIDENCE, 1000u64.to_le_bytes().to_vec()),
+            (PROP_MARKET_SESSION, 0i16.to_le_bytes().to_vec()),
+            (PROP_FEED_UPDATE_TS, fts),
+        ]
+    }
+    #[test]
+    fn multi_feed_message() {
+        let m = envelope(&[(1314, full(18_000_000)), (1435, full(40_000_000)), (922, vec![])]);
+        assert_eq!(parse_report(&m, 1314).unwrap().price, 18_000_000);
+        assert_eq!(parse_report(&m, 1435).unwrap().price, 40_000_000);
+        assert!(parse_report(&m, 922).is_err()); // target missing properties
+        assert!(parse_report(&m, 1398).is_err()); // not in message
+        let dup = envelope(&[(1314, full(1)), (1314, full(2))]);
+        assert!(parse_report(&dup, 1314).is_err());
+        let unknown = envelope(&[(1314, full(1)), (1435, vec![(7, vec![0, 0])])]);
+        assert!(parse_report(&unknown, 1314).is_err());
+        // A TSLA market rejects the NVDA entry even when the message carries both.
+        let mut mk = market();
+        mk.feed_id = 1435;
+        let r = parse_report(&m, 1314).unwrap();
+        expect(&r, &mk, Leg::Friday, PythError::WrongFeed);
+    }
     #[test]
     fn wrong_session() {
         let r = parse_report(&premarket(), 1314).unwrap();
