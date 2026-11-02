@@ -517,14 +517,26 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   const realFeeds: number[] = [];
   // A transient RPC error must not drop a feed for the weekend: retry, then fail startup so the host restarts us.
   const waits = over.startupRetryMs ?? [2_000, 4_000, 8_000, 16_000];
+  // A market that is missing on every try (closed) or already settled is skipped, so a stale entry cannot block the
+  // other feeds. Only an RPC error that persists through every try stops startup.
   for (const m of realMarkets) {
     let mk = null;
+    let failed = false;
     for (let i = 0; ; i++) {
-      mk = await readMarket(conn, programId, m).catch(() => null);
+      failed = false;
+      mk = await readMarket(conn, programId, m).catch(() => { failed = true; return null; });
       if (mk || i >= waits.length) break;
       await new Promise((r) => setTimeout(r, waits[i]));
     }
-    if (!mk) throw new Error(`REAL_MARKETS: ${m.toBase58()} could not be read after ${waits.length + 1} tries; refusing to start without its feed`);
+    if (failed) throw new Error(`REAL_MARKETS: ${m.toBase58()} could not be read after ${waits.length + 1} tries; refusing to start without its feed`);
+    if (!mk) {
+      console.error(`REAL_MARKETS: ${m.toBase58()} does not exist (closed?); its feed is not streamed. Remove it from REAL_MARKETS`);
+      continue;
+    }
+    if (mk.state === "MondayFinal" || mk.state === "Voided") {
+      console.error(`REAL_MARKETS: ${m.toBase58()} is ${mk.state}; its feed is not needed. Remove it from REAL_MARKETS`);
+      continue;
+    }
     if (!marketByFeed(mk.eligibility.feedId)) {
       throw new Error(`REAL_MARKETS: ${m.toBase58()} uses feed ${mk.eligibility.feedId}, which has no entry in config.ts MARKETS`);
     }

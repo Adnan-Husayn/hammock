@@ -102,6 +102,27 @@ describe("stream feeds through startService", () => {
     expect(feeds).toEqual([1314, 1435]);
   });
 
+  it("skips a closed (missing) or settled real market and streams the others", async () => {
+    const c = setup();
+    const tsla = await marketBytes({ feedId: 1435 });
+    const settled = await marketBytes({ feedId: 922, state: { MondayFinal: {} } });
+    const live = Keypair.generate().publicKey, gone = Keypair.generate().publicKey, done = Keypair.generate().publicKey;
+    const conn = {
+      getAccountInfo: async (k: PublicKey) => (k.equals(live) ? { owner: c.programId, data: tsla } : k.equals(done) ? { owner: c.programId, data: settled } : null),
+      getBalance: async () => 0,
+    } as any;
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    let feeds: number[] = [];
+    servers.push(await startService({ ...c.env, ENABLED_SYMBOLS: "NVDA", REAL_MARKETS: [gone, live, done].map((k) => k.toBase58()).join(",") }, {
+      conn, reference: async () => null, startupRetryMs: [1, 1, 1, 1], stream: (_f, _o, ids) => { feeds = ids; return () => {}; },
+    }));
+    expect(feeds).toEqual([1314, 1435]);
+    const lines = log.mock.calls.map((a) => String(a[0]));
+    expect(lines.some((l) => l.includes(gone.toBase58()) && /Remove it from REAL_MARKETS/.test(l))).toBe(true);
+    expect(lines.some((l) => l.includes(done.toBase58()) && /MondayFinal/.test(l))).toBe(true);
+    log.mockRestore();
+  });
+
   it("refuses to start when a real market cannot be read after the retries", async () => {
     const c = setup();
     let calls = 0;

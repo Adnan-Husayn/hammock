@@ -197,7 +197,10 @@ describe("submit_report transaction size", () => {
     const { submitReportInstructions } = await import("../src/chain.ts");
     const msg = Buffer.from(fixture("regular-2026-10-29").solana.data, "hex");
     expect(msg.length).toBe(158);
-    expect(msg[4 + 64 + 32 + 2 + 4 + 8 + 1]).toBe(1); // exactly one feed in the signed message
+    // Byte 115 = envelope magic(4) + signature(64) + pubkey(32) + payload length(2) + payload magic(4)
+    // + timestamp(8) + channel(1): the feed count. Checked against the fixture: 1 feed, id 1314 at bytes 116..120.
+    expect(msg[4 + 64 + 32 + 2 + 4 + 8 + 1]).toBe(1);
+    expect(msg.readUInt32LE(116)).toBe(1314);
     const payer = Keypair.generate();
     const tx = new Transaction().add(...submitReportInstructions(pk(), payer.publicKey, pk(), "friday", msg));
     tx.recentBlockhash = pk().toBase58();
