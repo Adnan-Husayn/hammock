@@ -13,13 +13,15 @@ import { nvdaxReference } from "./jupiter.ts";
 import { Freeze, loadGaps } from "./pricing.ts";
 import { Quoter, readLastNonce, readMarket, type QuoteResult } from "./quote.ts";
 import { RelayRefused, relay, sandboxMarketCheck, type RelayContext } from "./relay.ts";
-import { Sandbox, devnetSandboxChain, faucet, type DevnetSetup, type SandboxMode } from "./sandbox.ts";
+import { FAUCET_SOL_PER_HOUR_LAMPORTS, HourlyCap, Sandbox, devnetSandboxChain, faucet, type DevnetSetup, type SandboxMode } from "./sandbox.ts";
 
 export type ServiceDeps = {
   quoter: Pick<Quoter, "quote">;
   sandbox: Pick<Sandbox, "start" | "bell">;
   relay(raw: Buffer): Promise<{ transaction: Buffer; user: PublicKey }>;
   faucet(wallet: PublicKey): Promise<string>;
+  /** Last faucet use per wallet. Defaults to memory; startService persists it under logs/. */
+  faucetCooldown?: { get(k: string): number | undefined; set(k: string, t: number): void; delete(k: string): void };
   relayPayer: PublicKey;
   /** Relay key balance in lamports; the relay stops co-signing below RELAY_MIN_LAMPORTS. */
   relayBalance(): Promise<number>;
@@ -124,7 +126,7 @@ function quoteJson(r: Extract<QuoteResult, { ok: true }>) {
 /** HTTP API. Keys never leave this process: responses carry public keys and signatures only. */
 export function serviceServer(d: ServiceDeps): Server {
   const now = d.nowMs ?? Date.now;
-  const lastFaucet = new Map<string, number>();
+  const lastFaucet = d.faucetCooldown ?? new Map<string, number>();
   const faucetAll = new RateLimit(FAUCET_PER_MINUTE);
   const relayIp = new RateLimit(RELAY_PER_MINUTE_IP);
   const relayUser = new RateLimit(RELAY_PER_MINUTE_USER);
@@ -235,6 +237,38 @@ class PersistedSet {
   }
 }
 
+/** Last faucet use per wallet, persisted so a restart does not reset the cooldown. Entries past the cooldown are dropped on write. */
+export class PersistedCooldown {
+  private m: Record<string, number>;
+  private path: string;
+  private ttlMs: number;
+  constructor(path: string, ttlMs: number) {
+    this.path = path;
+    this.ttlMs = ttlMs;
+    try {
+      this.m = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+    } catch {
+      this.m = {};
+    }
+  }
+  get(k: string) {
+    return this.m[k];
+  }
+  set(k: string, t: number) {
+    for (const [w, at] of Object.entries(this.m)) if (t - at >= this.ttlMs) delete this.m[w];
+    this.m[k] = t;
+    this.save();
+  }
+  delete(k: string) {
+    delete this.m[k];
+    this.save();
+  }
+  private save() {
+    mkdirSync(dirname(this.path), { recursive: true });
+    writeFileSync(this.path, JSON.stringify(this.m));
+  }
+}
+
 /** f_x per market, persisted so a restart keeps it. */
 class FridayRefs {
   private m: Record<string, number>;
@@ -329,6 +363,12 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   if ([dealer, demo, quoteKey].some((k) => k.publicKey.equals(feePayer.publicKey))) {
     throw new Error("RELAY_KEYPAIR must be a separate key that holds only SOL for fees");
   }
+  const faucetKey = env.FAUCET_KEYPAIR ? keypairFromEnv("FAUCET_KEYPAIR", env) : null;
+  if (faucetKey && [dealer, feePayer].some((k) => k.publicKey.equals(faucetKey.publicKey))) {
+    throw new Error("FAUCET_KEYPAIR must differ from the dealer and relay keys");
+  }
+  if (!faucetKey) console.warn("FAUCET_KEYPAIR is not set: the faucet sends tokens only, no SOL");
+  const solCap = new HourlyCap(FAUCET_SOL_PER_HOUR_LAMPORTS);
   const conn = over.conn ?? new Connection(cfg.rpcUrl, "confirmed");
   const reference = over.reference ?? nvdaxReference;
   const freeze = new Freeze();
@@ -406,7 +446,8 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     quoter,
     sandbox,
     relay: (raw) => relay(raw, relayCtx, feePayer),
-    faucet: (w) => faucet(setup, w),
+    faucet: async (w) => (await faucet(setup, w, { faucetKey, solCap, nowMs })).signature,
+    faucetCooldown: new PersistedCooldown(env.FAUCET_COOLDOWN_PATH ?? join(ROOT, "logs", "faucet-cooldown.json"), FAUCET_COOLDOWN_MS),
     relayPayer: feePayer.publicKey,
     relayBalance: () => conn.getBalance(feePayer.publicKey, "confirmed"),
     trustProxy: env.TRUST_PROXY === "1" || env.TRUST_PROXY === "true",

@@ -226,18 +226,61 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
   };
 }
 
-const FAUCET_LAMPORTS = 5_000_000;
+export const FAUCET_LAMPORTS = 5_000_000;
+/** SOL goes only to a wallet holding less than this; a judge who already has fee SOL gets tokens only. */
+export const FAUCET_SOL_BELOW_LAMPORTS = 3_000_000;
+/** All wallets together, per rolling hour. */
+export const FAUCET_SOL_PER_HOUR_LAMPORTS = 250_000_000;
 
-/** Faucet: a little SOL for rent, demo USDC and a little NVDAx (test) to the judge's wallet. The dealer holds both mint authorities. */
-export async function faucet(s: DevnetSetup, wallet: PublicKey, usdc = 100_000_000n, nvdax = 100_000_000n) {
+/** Rolling one-hour cap on SOL the faucet sends, across all wallets. */
+export class HourlyCap {
+  private sent: { t: number; v: number }[] = [];
+  private cap: number;
+  constructor(cap: number) {
+    this.cap = cap;
+  }
+  take(v: number, nowMs: number): boolean {
+    this.sent = this.sent.filter((e) => nowMs - e.t < 3_600_000);
+    if (this.sent.reduce((a, e) => a + e.v, 0) + v > this.cap) return false;
+    this.sent.push({ t: nowMs, v });
+    return true;
+  }
+}
+
+export type FaucetOptions = {
+  /** Pays the SOL drip, the fees and the token account rent. Unset: no SOL is sent, and the dealer pays fees and rent. */
+  faucetKey?: Keypair | null;
+  solCap?: HourlyCap;
+  nowMs?: () => number;
+  usdc?: bigint;
+  nvdax?: bigint;
+};
+
+/**
+ * Faucet: demo USDC and a little NVDAx (test) to the judge's wallet, plus a little SOL for Position rent when the
+ * wallet has almost none. The dealer signs only as mint authority. SOL never comes from the dealer key, because the
+ * dealer pays the keeper's reports and finalise calls and must not be drained by fresh wallets.
+ */
+export async function faucet(s: DevnetSetup, wallet: PublicKey, o: FaucetOptions = {}) {
+  const usdc = o.usdc ?? 100_000_000n;
+  const nvdax = o.nvdax ?? 100_000_000n;
+  const payer = o.faucetKey ?? s.dealer;
   const usdcAta = getAssociatedTokenAddressSync(s.usdcMint, wallet);
   const nvdaxAta = getAssociatedTokenAddressSync(s.nvdaxMint, wallet, false, TOKEN_2022_PROGRAM_ID);
-  return send(s.conn, s.dealer, [
+  const ixs: TransactionInstruction[] = [];
+  let solLamports = 0;
+  if (o.faucetKey && (await s.conn.getBalance(wallet, "confirmed")) < FAUCET_SOL_BELOW_LAMPORTS
+    && (o.solCap ?? new HourlyCap(FAUCET_SOL_PER_HOUR_LAMPORTS)).take(FAUCET_LAMPORTS, (o.nowMs ?? Date.now)())) {
+    solLamports = FAUCET_LAMPORTS;
     // A buyer pays rent for their Position account, and a fresh judge wallet holds no SOL.
-    SystemProgram.transfer({ fromPubkey: s.dealer.publicKey, toPubkey: wallet, lamports: FAUCET_LAMPORTS }),
-    createAssociatedTokenAccountIdempotentInstruction(s.dealer.publicKey, usdcAta, wallet, s.usdcMint),
+    ixs.push(SystemProgram.transfer({ fromPubkey: o.faucetKey.publicKey, toPubkey: wallet, lamports: FAUCET_LAMPORTS }));
+  }
+  ixs.push(
+    createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, usdcAta, wallet, s.usdcMint),
     createMintToInstruction(s.usdcMint, usdcAta, s.dealer.publicKey, usdc),
-    createAssociatedTokenAccountIdempotentInstruction(s.dealer.publicKey, nvdaxAta, wallet, s.nvdaxMint, TOKEN_2022_PROGRAM_ID),
+    createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, nvdaxAta, wallet, s.nvdaxMint, TOKEN_2022_PROGRAM_ID),
     createMintToInstruction(s.nvdaxMint, nvdaxAta, s.dealer.publicKey, nvdax, [], TOKEN_2022_PROGRAM_ID),
-  ]);
+  );
+  const signature = await send(s.conn, payer, ixs, [s.dealer]);
+  return { signature, solLamports };
 }

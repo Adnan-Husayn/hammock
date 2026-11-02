@@ -33,6 +33,13 @@ readable by the container's `node` user, on a path outside the volume described 
 | `QUOTE_KEYPAIR` | Optional. Quote signing key; the dealer key is used when unset |
 | `FAUCET_KEYPAIR` | Optional. Pays the faucet's SOL drips. Must differ from the dealer and relay keys. When unset the faucet sends tokens only, no SOL |
 
+The faucet's SOL drip (0.005 SOL, only to a wallet holding under 0.003 SOL, at most 0.25 SOL per hour across all
+wallets) comes from `FAUCET_KEYPAIR`, never the dealer, so fresh wallets cannot drain the keeper's fee payer. The Fly
+configs do not mount it yet. To enable it, generate a key that holds only a little SOL, store it as the secret
+`FAUCET_KEY_B64`, and add to both `fly.toml` and `fly.real.toml` a `[[files]]` entry with
+`guest_path = "/run/keys/faucet.json"` and `secret_name = "FAUCET_KEY_B64"`, plus `FAUCET_KEYPAIR =
+"/run/keys/faucet.json"` under `[env]`. The per-wallet faucet cooldown is kept in `logs/faucet-cooldown.json`.
+
 ## Configuration
 
 | Name | Required | Meaning |
