@@ -1,13 +1,17 @@
-// Dealer tool: creates a real (non-sandbox) market for one weekend and prints its address for REAL_MARKETS.
+// Dealer tool: creates a real (non-sandbox) market for one stock and one weekend and prints its address for
+// REAL_MARKETS. Several stocks share a weekend: the market address includes the feed id.
 //
 // Usage (from the repository root):
 //   DEALER_KEYPAIR=~/deploy-keypair.json [QUOTE_PUBKEY=<key>] [RPC_URL=...] \
-//     node scripts/create-real-market.ts <YYYY-MM-DD> [--max-contracts 5000] [--dry-run]
+//     node scripts/create-real-market.ts <SYMBOL> <YYYY-MM-DD> [--max-contracts 5000] [--dry-run]
 //
+// SYMBOL is one of service/src/config.ts MARKETS (NVDA, TSLA, SPY, AAPL, ...); its feed id, caps and minimum
+// publishers come from there, its test mint from config/devnet.json testMints.
 // The date is any trading day of the week whose Friday you want; normally the Friday itself.
 // Checks before sending (spec section 4):
-//   - Pyth's schedule for feed 1314: refuses holiday weeks; early-close Fridays get the 12:59:30 ET target.
-//   - the NVDAx (test) mint: refuses when a multiplier change is scheduled between now and the Monday target.
+//   - Pyth's US equity schedule (fixtures/pyth/symbols-1314.json; the same exchange calendar applies to every US
+//     stock): refuses holiday weeks; early-close Fridays get the 12:59:30 ET target.
+//   - the stock's test mint: refuses when a multiplier change is scheduled between now and the Monday target.
 //   - the Friday target must be at least an hour (plus a margin) away; the program enforces the hour too.
 // Buying closes Sunday 17:50 ET (spec section 4, "Buying"). Reserves are funded by create_market itself:
 // max_contracts * 1 USDC to collateral and 2 * 0.1 USDC to the bounty reserve, from the dealer's demo USDC.
@@ -18,9 +22,9 @@ import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getScaledUiAmountConfig, unpackMint } from "@solana/spl-token";
 import { etToUtc, scheduleTargets } from "./schedule.ts";
 import {
-  BOUNTY_PER_LEG, createMarketInstruction, encodeMarketParams, type MarketParams,
+  BOUNTY_PER_LEG, createMarketInstruction, type MarketParams,
 } from "../service/src/sandbox.ts";
-import { CONF_CAP_BPS, MIN_PUBLISHERS } from "../service/src/config.ts";
+import { DEFAULT_SYMBOL, devnetTestMint, marketByFeed, marketBySymbol, type MarketConfig } from "../service/src/config.ts";
 
 export const DEFAULT_MAX_CONTRACTS = 5_000;
 /** The program's MIN_CREATE_LEAD_S is 3_600; keep a margin for the transaction to land. */
@@ -43,11 +47,13 @@ export function buyingClose(mondayTargetUtc: Date): Date {
 export function checkMultiplier(m: MultiplierState, nowS: bigint, mondayTs: bigint): void {
   const t = m.newMultiplierEffectiveTs;
   if (t > nowS && t <= mondayTs && m.newMultiplier !== m.multiplier) {
-    throw new Refusal(`NVDAx mint has a multiplier change (${m.multiplier} -> ${m.newMultiplier}) scheduled at ${new Date(Number(t) * 1000).toISOString()}, before the Monday target`);
+    throw new Refusal(`test mint has a multiplier change (${m.multiplier} -> ${m.newMultiplier}) scheduled at ${new Date(Number(t) * 1000).toISOString()}, before the Monday target`);
   }
 }
 
 export type BuildInput = {
+  /** Default NVDA. */
+  symbol?: string;
   dateEt: string;
   nowS: bigint;
   quoteKey: PublicKey;
@@ -58,6 +64,8 @@ export type BuildInput = {
 
 /** All checks and the parameters for one real market. Throws Refusal when the market must not be created. */
 export function buildRealMarketParams(i: BuildInput): MarketParams {
+  const cfg: MarketConfig | undefined = marketBySymbol(i.symbol ?? DEFAULT_SYMBOL);
+  if (!cfg) throw new Refusal(`unknown symbol ${i.symbol}`);
   const t = i.schedule === undefined ? scheduleTargets(i.dateEt) : scheduleTargets(i.dateEt, i.schedule);
   if (t === "holiday") throw new Refusal(`the week of ${i.dateEt} has a market holiday on the anchor day, Friday or Monday`);
   const fridayTargetTs = BigInt(Math.floor(t.fridayTargetUtc.getTime() / 1000));
@@ -70,8 +78,8 @@ export function buildRealMarketParams(i: BuildInput): MarketParams {
   const maxContracts = i.maxContracts ?? DEFAULT_MAX_CONTRACTS;
   if (!Number.isInteger(maxContracts) || maxContracts <= 0) throw new Refusal("max contracts must be a positive integer");
   return {
-    fridayTargetTs, mondayTargetTs, buyingCloseTs,
-    fridayConfCapBps: CONF_CAP_BPS.friday, mondayConfCapBps: CONF_CAP_BPS.monday, minPublishers: MIN_PUBLISHERS,
+    feedId: cfg.feedId, fridayTargetTs, mondayTargetTs, buyingCloseTs,
+    fridayConfCapBps: cfg.confCapBps.friday, mondayConfCapBps: cfg.confCapBps.monday, minPublishers: cfg.minPublishers,
     maxContracts, quoteKey: i.quoteKey, sandbox: false, demoAuthority: PublicKey.default, mode: "gap",
   };
 }
@@ -83,6 +91,7 @@ export function describeParams(p: MarketParams, market: PublicKey): Record<strin
   const iso = (s: bigint) => new Date(Number(s) * 1000).toISOString();
   return {
     market: market.toBase58(),
+    symbol: marketByFeed(p.feedId)?.symbol ?? "?", feedId: p.feedId,
     fridayTarget: iso(p.fridayTargetTs), mondayTarget: iso(p.mondayTargetTs), buyingClose: iso(p.buyingCloseTs),
     fridayConfCapBps: p.fridayConfCapBps, mondayConfCapBps: p.mondayConfCapBps, minPublishers: p.minPublishers,
     maxContracts: p.maxContracts, reserveUsdc: (Number(reserveUsdc(p)) / 1e6).toFixed(2),
@@ -92,14 +101,16 @@ export function describeParams(p: MarketParams, market: PublicKey): Record<strin
 
 export function readMultiplier(data: Buffer, mint: PublicKey, owner: PublicKey): MultiplierState {
   const c = getScaledUiAmountConfig(unpackMint(mint, { data, owner, lamports: 0, executable: false } as any, TOKEN_2022_PROGRAM_ID));
-  if (!c) throw new Refusal("NVDAx mint has no ScaledUiAmount extension");
+  if (!c) throw new Refusal("test mint has no ScaledUiAmount extension");
   return { multiplier: c.multiplier, newMultiplier: c.newMultiplier, newMultiplierEffectiveTs: BigInt(c.newMultiplierEffectiveTimestamp) };
 }
 
 async function main() {
   const args = process.argv.slice(2);
   const dateEt = args.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a));
-  if (!dateEt) throw new Error("usage: node scripts/create-real-market.ts <YYYY-MM-DD> [--max-contracts N] [--dry-run]");
+  const symbol = args.find((a) => /^[A-Za-z]{1,6}$/.test(a))?.toUpperCase();
+  if (!dateEt || !symbol) throw new Error("usage: node scripts/create-real-market.ts <SYMBOL> <YYYY-MM-DD> [--max-contracts N] [--dry-run]");
+  if (!marketBySymbol(symbol)) throw new Refusal(`unknown symbol ${symbol}`);
   const dryRun = args.includes("--dry-run");
   const mi = args.indexOf("--max-contracts");
   const maxContracts = mi >= 0 ? Number(args[mi + 1]) : undefined;
@@ -112,16 +123,18 @@ async function main() {
   const dealer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keyPath, "utf8"))));
   const quoteKey = process.env.QUOTE_PUBKEY ? new PublicKey(process.env.QUOTE_PUBKEY) : dealer.publicKey;
   const usdcMint = new PublicKey(devnet.usdcDemo.mint);
-  const nvdaxMint = new PublicKey(devnet.nvdaxTest.mint);
+  const testMint = devnetTestMint(devnet, symbol);
+  if (!testMint) throw new Refusal(`no test mint for ${symbol} in config/devnet.json; run scripts/create-test-mints.ts ${symbol}`);
+  const stockMint = new PublicKey(testMint);
   const conn = new Connection(process.env.RPC_URL ?? process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com", "confirmed");
 
-  const info = await conn.getAccountInfo(nvdaxMint);
-  if (!info) throw new Refusal("NVDAx mint not found");
+  const info = await conn.getAccountInfo(stockMint);
+  if (!info) throw new Refusal(`${symbol} test mint not found`);
   const p = buildRealMarketParams({
-    dateEt, nowS: BigInt(Math.floor(Date.now() / 1000)), quoteKey, maxContracts,
-    multiplier: readMultiplier(info.data, nvdaxMint, info.owner),
+    symbol, dateEt, nowS: BigInt(Math.floor(Date.now() / 1000)), quoteKey, maxContracts,
+    multiplier: readMultiplier(info.data, stockMint, info.owner),
   });
-  const { market, ix } = createMarketInstruction(programId, dealer.publicKey, usdcMint, nvdaxMint, p.fridayTargetTs, encodeMarketParams(p));
+  const { market, ix } = createMarketInstruction(programId, dealer.publicKey, usdcMint, stockMint, p);
   console.log(describeParams(p, market));
   if (dryRun) return console.log("dry run: nothing sent");
   if (await conn.getAccountInfo(market)) throw new Refusal(`market ${market.toBase58()} already exists`);

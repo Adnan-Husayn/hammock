@@ -54,7 +54,7 @@ export type Candidate = { price: bigint; feedTsUs: bigint; submitter: PublicKey 
 
 export type MarketInfo = {
   dealer: PublicKey;
-  nvdaxMint: PublicKey;
+  stockMint: PublicKey;
   usdcMint: PublicKey;
   tokenProgram: PublicKey;
   escrow: PublicKey;
@@ -107,7 +107,7 @@ export function decodeMarket(data: Buffer): MarketInfo {
   const dealer = r.pk();
   r.skip(1 + 1); // bump, vault_bump
   const feedId = r.u32(), exponent = r.i16();
-  const nvdaxMint = r.pk(), usdcMint = r.pk(), tokenProgram = r.pk(), escrow = r.pk(), collateralReserve = r.pk(), bountyReserve = r.pk();
+  const stockMint = r.pk(), usdcMint = r.pk(), tokenProgram = r.pk(), escrow = r.pk(), collateralReserve = r.pk(), bountyReserve = r.pk();
   const fridayTargetUs = r.i64(), mondayTargetUs = r.i64(), buyingCloseTs = r.i64();
   const fridayTargetTs = fridayTargetUs / 1_000_000n, mondayTargetTs = mondayTargetUs / 1_000_000n;
   r.skip(2 * 2); // bands
@@ -128,7 +128,7 @@ export function decodeMarket(data: Buffer): MarketInfo {
   const buyingClosed = r.bool();
   return {
     eligibility: { feedId, exponent, halfWindowUs, fridayConfCapBps, mondayConfCapBps, minPublishers, fridayTargetUs, mondayTargetUs },
-    dealer, nvdaxMint, usdcMint, tokenProgram, escrow, collateralReserve, bountyReserve, fridayTargetTs, mondayTargetTs, buyingCloseTs,
+    dealer, stockMint, usdcMint, tokenProgram, escrow, collateralReserve, bountyReserve, fridayTargetTs, mondayTargetTs, buyingCloseTs,
     maxContracts, dealerQuoteKey, quoteMaxLifetimeS, sandbox, demoAuthority, sandboxMode, state, friday, monday, contractsSold,
     totalPremiums, openPositions, buyingClosed,
   };
@@ -160,10 +160,13 @@ export async function readLastNonce(conn: Connection, programId: PublicKey, mark
 export type QuoterDeps = {
   readMarket(market: PublicKey): Promise<MarketInfo | null>;
   readLastNonce(market: PublicKey, buyer: PublicKey): Promise<bigint>;
+  /** Single-market default: used when `forFeed` is not given. */
   freeze: Freeze;
-  /** f_x: the NVDAx reference recorded when the market's Friday mark finalised. */
+  /** f_x: the token's reference recorded when the market's Friday mark finalised. */
   fridayRef(market: PublicKey): number | undefined;
   gaps: readonly number[];
+  /** Per market: the freeze and gap history of the market's feed, or undefined when this service does not price it. */
+  forFeed?(feedId: number): { freeze: Freeze; gaps: readonly number[] } | undefined;
   quoteKey: Keypair;
   nowMs(): number;
   /** Sandbox markets whose Monday bell was rung: no more quotes. */
@@ -201,20 +204,23 @@ export class Quoter {
     }
     if (!Number.isInteger(contracts) || contracts < 1) return { ok: false, reason: "contracts must be a positive integer" };
     if (mk.contractsSold + contracts > mk.maxContracts) return { ok: false, reason: "not enough capacity" };
+    const per = this.d.forFeed ? this.d.forFeed(mk.eligibility.feedId) : { freeze: this.d.freeze, gaps: this.d.gaps };
+    if (!per) return { ok: false, reason: "this service does not price that stock" };
+    const freeze = per.freeze;
 
     // Real markets obey the freeze. Sandbox markets ignore it and fall back to the last good reference.
     let ref: Reference | null;
-    if (mk.sandbox) ref = this.d.freeze.current ?? this.d.freeze.lastGood;
+    if (mk.sandbox) ref = freeze.current ?? freeze.lastGood;
     else {
-      if (this.d.freeze.isFrozen(now)) return { ok: false, reason: "quotes paused by the freeze rule" };
-      ref = this.d.freeze.current;
+      if (freeze.isFrozen(now)) return { ok: false, reason: "quotes paused by the freeze rule" };
+      ref = freeze.current;
     }
     const fx = this.d.fridayRef(market);
     let m = 0;
     if (ref && fx) m = (fx - ref.price) / fx;
     else if (!mk.sandbox) return { ok: false, reason: "no Friday reference price recorded" };
 
-    const inputs = { gaps: this.d.gaps, m, sold: mk.contractsSold, max: mk.maxContracts };
+    const inputs = { gaps: per.gaps, m, sold: mk.contractsSold, max: mk.maxContracts };
     const b = priceBreakdown(inputs);
     if (b.units >= MAX_PREMIUM * BASE_UNITS) return { ok: false, reason: "premium would be 0.95 or more" };
 

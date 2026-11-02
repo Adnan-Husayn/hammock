@@ -123,7 +123,7 @@ async function sandboxMarketBytes() {
   const k = PublicKey.default;
   const bn = (n: number) => new BN(n);
   return new BorshAccountsCoder(idl).encode("Market", {
-    dealer: k, bump: 0, vault_bump: 0, feed_id: 1314, exponent: -5, nvdax_mint: k, usdc_mint: k, token_program: k, escrow: k,
+    dealer: k, bump: 0, vault_bump: 0, feed_id: 1314, exponent: -5, stock_mint: k, usdc_mint: k, token_program: k, escrow: k,
     collateral_reserve: k, bounty_reserve: k, friday_target_ts_us: bn(0), monday_target_ts_us: bn(0), buying_close_ts: bn(0),
     band_lower_bps: 100, band_upper_bps: 500, friday_conf_cap_bps: 10, monday_conf_cap_bps: 20, min_publishers: 10,
     eligibility_half_window_us: bn(0), submission_window_us: bn(0), max_contracts: 200, bounty_per_leg: bn(0), claim_deadline_s: bn(0),

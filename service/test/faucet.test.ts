@@ -19,7 +19,7 @@ function setup(walletLamports: number) {
   } as any;
   const s: DevnetSetup = {
     conn, programId: Keypair.generate().publicKey, dealer, demo: Keypair.generate(), quoteKey: dealer.publicKey,
-    usdcMint: Keypair.generate().publicKey, nvdaxMint: Keypair.generate().publicKey,
+    usdcMint: Keypair.generate().publicKey, stockMint: Keypair.generate().publicKey,
   };
   return { s, sent };
 }

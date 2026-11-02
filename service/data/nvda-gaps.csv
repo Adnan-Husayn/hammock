@@ -1,9 +1,9 @@
-# NVDA weekend gaps, last 104 weekends. PROXY: Friday regular close to Monday regular open from free daily bars
+# NVDA weekend gaps, last 104 weekends.
+# PROXY: Friday regular close to Monday regular open from free daily bars
 # (Yahoo Finance), not the 15:59:30 ET Friday and 09:31:30 ET Monday marks used for settlement.
 # gap = (friday_close - monday_open) / friday_close, positive = fall. Holiday weekends skipped.
-# Built 2026-10-29 by scripts/build-gaps.mjs.
+# Built 2026-11-02 by scripts/build-gaps.mjs.
 friday,monday,friday_close,monday_open,gap
-2024-07-26,2024-07-29,113.0600,113.6900,-0.005572
 2024-08-02,2024-08-05,107.2700,92.0600,0.141792
 2024-08-09,2024-08-12,104.7500,106.3200,-0.014988
 2024-08-16,2024-08-19,124.5800,124.2800,0.002408
@@ -107,3 +107,4 @@ friday,monday,friday_close,monday_open,gap
 2026-10-09,2026-10-12,229.2800,228.7300,0.002399
 2026-10-16,2026-10-19,214.1300,218.1000,-0.018540
 2026-10-23,2026-10-26,210.9600,213.1100,-0.010191
+2026-10-30,2026-11-02,204.6400,207.5900,-0.014416

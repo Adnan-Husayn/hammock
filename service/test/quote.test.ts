@@ -51,7 +51,7 @@ const snake = (o: Record<string, any>) =>
 
 function marketFields(o: Partial<Record<string, any>> = {}) {
   return snake({
-    dealer: pk(9), bump: 1, vaultBump: 2, feedId: 1314, exponent: -5, nvdaxMint: pk(10), usdcMint: pk(11), tokenProgram: pk(12),
+    dealer: pk(9), bump: 1, vaultBump: 2, feedId: 1314, exponent: -5, stockMint: pk(10), usdcMint: pk(11), tokenProgram: pk(12),
     escrow: pk(13), collateralReserve: pk(14), bountyReserve: pk(15), fridayTargetTsUs: new BN(1_000_000_000_000_000), mondayTargetTsUs: new BN(1_000_000_600_000_000),
     buyingCloseTs: new BN(1_000_000_600), bandLowerBps: 100, bandUpperBps: 500, fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10,
     eligibilityHalfWindowUs: new BN(5_000_000), submissionWindowUs: new BN(5_000_000), maxContracts: 200, bountyPerLeg: new BN(100_000),
@@ -72,7 +72,7 @@ describe("decodeMarket / decodeLastNonce", () => {
     expect(m.sandbox).toBe(true);
     expect(m.sandboxMode).toBe("gap");
     expect(m.dealerQuoteKey.equals(pk(16))).toBe(true);
-    expect(m.nvdaxMint.equals(pk(10))).toBe(true);
+    expect(m.stockMint.equals(pk(10))).toBe(true);
     expect(m.friday?.price).toBe(20_000_000n);
     expect(m.monday).toBeNull();
     expect([m.contractsSold, m.maxContracts, m.openPositions, m.buyingClosed]).toEqual([12, 200, 2, false]);
@@ -112,7 +112,7 @@ describe("decodeMarket / decodeLastNonce", () => {
 const NOW_S = 1_000_000_100;
 function market(o: Partial<MarketInfo> = {}): MarketInfo {
   return {
-    dealer: pk(9), nvdaxMint: pk(10), usdcMint: pk(11), tokenProgram: pk(12), escrow: pk(13), collateralReserve: pk(14), bountyReserve: pk(15),
+    dealer: pk(9), stockMint: pk(10), usdcMint: pk(11), tokenProgram: pk(12), escrow: pk(13), collateralReserve: pk(14), bountyReserve: pk(15),
     fridayTargetTs: 1_000_000_000n, mondayTargetTs: 1_000_000_601n, buyingCloseTs: 1_000_000_600n, maxContracts: 200,
     dealerQuoteKey: PublicKey.default, quoteMaxLifetimeS: 90n, sandbox: false, demoAuthority: PublicKey.default, sandboxMode: "gap",
     state: "FridayFinal", friday: { price: 20_000_000n, feedTsUs: 1_000_000_000_000_000n, submitter: pk(1) }, monday: null,
@@ -136,6 +136,30 @@ function quoter(o: { mk?: Partial<MarketInfo>; nonce?: () => bigint; freeze?: Fr
   });
   return { q, key };
 }
+
+describe("Quoter per stock", () => {
+  it("prices from the market's own feed and refuses a feed the service does not price", async () => {
+    const key = Keypair.generate();
+    const freezeFor = (price: number) => { const f = new Freeze(); f.update(ref(price), NOW_S * 1000); return f; };
+    const per = new Map([[1314, { freeze: freezeFor(200), gaps: [0.02] }], [1435, { freeze: freezeFor(190), gaps: [-0.03] }]]);
+    const q = (feedId: number) => new Quoter({
+      readMarket: async () => market({ dealerQuoteKey: key.publicKey, eligibility: { feedId } as any }),
+      readLastNonce: async () => 0n,
+      freeze: new Freeze(), gaps: [],
+      forFeed: (id) => per.get(id),
+      fridayRef: () => 200,
+      quoteKey: key,
+      nowMs: () => NOW_S * 1000,
+    });
+    const nvda = await q(1314).quote(pk(1), pk(2), 1);
+    const tsla = await q(1435).quote(pk(1), pk(2), 1);
+    expect(nvda.ok && tsla.ok).toBe(true);
+    if (!nvda.ok || !tsla.ok) return;
+    expect(nvda.inputs.m).toBe(0);
+    expect(tsla.inputs.m).toBeCloseTo(0.05, 12); // TSLA's own reference fell 5% from f_x
+    expect(await q(1163).quote(pk(1), pk(2), 1)).toMatchObject({ ok: false, reason: "this service does not price that stock" });
+  });
+});
 
 describe("Quoter", () => {
   it("prices with the section 7 formula and signs a 60 s quote", async () => {
@@ -269,7 +293,7 @@ describe("Sandbox", () => {
     const data = await new BorshAccountsCoder(idl).encode("Market", marketFields({ sandboxMode: { MultiplierVoid: {} } }));
     const programId = pk(50);
     const conn = { getAccountInfo: async () => ({ data, owner: pk(51), lamports: 1, executable: false }) } as any;
-    const chain = devnetSandboxChain({ conn, programId, dealer: Keypair.generate(), demo: Keypair.generate(), quoteKey: pk(16), usdcMint: pk(11), nvdaxMint: pk(10) });
+    const chain = devnetSandboxChain({ conn, programId, dealer: Keypair.generate(), demo: Keypair.generate(), quoteKey: pk(16), usdcMint: pk(11), stockMint: pk(10) });
     expect(await chain.readMarket(pk(42))).toBeNull();
     let multiplier = 0;
     chain.changeMultiplier = async () => { multiplier++; };
@@ -277,7 +301,7 @@ describe("Sandbox", () => {
     await expect(sb.bell(pk(42))).rejects.toThrow(/not a sandbox market/);
     expect(multiplier).toBe(0);
     // Owned by gap_cover, the same bytes decode.
-    const owned = devnetSandboxChain({ conn: { getAccountInfo: async () => ({ data, owner: programId }) } as any, programId, dealer: Keypair.generate(), demo: Keypair.generate(), quoteKey: pk(16), usdcMint: pk(11), nvdaxMint: pk(10) });
+    const owned = devnetSandboxChain({ conn: { getAccountInfo: async () => ({ data, owner: programId }) } as any, programId, dealer: Keypair.generate(), demo: Keypair.generate(), quoteKey: pk(16), usdcMint: pk(11), stockMint: pk(10) });
     expect((await owned.readMarket(pk(42)))?.sandbox).toBe(true);
   });
 });

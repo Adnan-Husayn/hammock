@@ -1,5 +1,5 @@
 // End-to-end sandbox run against the hosted service with a throwaway wallet, using the app's own transaction builders.
-// Usage: node --experimental-strip-types scripts/e2e-sandbox.ts [gap|multiplierVoid]
+// Usage: node --experimental-strip-types scripts/e2e-sandbox.ts [gap|multiplierVoid] [SYMBOL]   (default gap NVDA)
 import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { buildBuyTx, buildClaimTx, buildRefundTx, decodeMarket } from "../app/src/lib/program.ts";
 
@@ -7,6 +7,7 @@ const BASE = process.env.SERVICE_URL ?? "https://ambergris-moonrise-938.fly.dev"
 const programId = new PublicKey("HzYCke4ESM4ripYknCuGu3Bk9XU3xRTmBoYkHaESMG9g");
 const conn = new Connection(process.env.RPC_URL ?? "https://api.devnet.solana.com", "confirmed");
 const mode = process.argv[2] ?? "gap";
+const symbol = (process.argv[3] ?? "NVDA").toUpperCase();
 const user = Keypair.generate();
 
 async function j(r: Response) {
@@ -34,8 +35,8 @@ async function balance(mint: PublicKey) {
 }
 
 console.log("wallet", user.publicKey.toBase58());
-await post("/faucet", { wallet: user.publicKey.toBase58() });
-const start = await post("/sandbox/start", { mode });
+await post("/faucet", { wallet: user.publicKey.toBase58(), symbol });
+const start = await post("/sandbox/start", { mode, symbol });
 const market = new PublicKey(start.market);
 console.log("market", start.market, "friday", start.fridayPrice);
 await sleep(2000);

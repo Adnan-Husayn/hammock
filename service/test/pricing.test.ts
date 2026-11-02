@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Freeze, loadGaps, premiumPerContract, priceBreakdown } from "../src/pricing.ts";
-import { nvdaxReference, NVDAX_MINT, USDC_MINT } from "../src/jupiter.ts";
+import { nvdaxReference, STOCK_MINT, USDC_MINT } from "../src/jupiter.ts";
 
 const MIN = 60_000;
 
@@ -119,7 +119,7 @@ describe("nvdaxReference (stubbed Jupiter)", () => {
     });
     // shares = 5 * 1.25 = 6.25, price = 160, round trip = 50 bps
     expect(r).toEqual({ price: 160, roundTripBps: 50, multiplier: 1.25, decimals: 8 });
-    expect(calls[0]).toContain(`outputMint=${NVDAX_MINT}`);
+    expect(calls[0]).toContain(`outputMint=${STOCK_MINT}`);
     expect(calls[0]).toContain("amount=1000000000");
     expect(calls[1]).toContain("amount=500000000");
   });

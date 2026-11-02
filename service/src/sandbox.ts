@@ -6,17 +6,18 @@ import {
 } from "@solana/spl-token";
 import { readMarket as readGapMarket, type MarketInfo } from "./quote.ts";
 import type { Reference } from "./jupiter.ts";
+import { DEFAULT_SYMBOL, EXPONENT, marketBySymbol, type MarketConfig } from "./config.ts";
 
 export type SandboxMode = "gap" | "multiplierVoid";
 /** Monday falls a gap-mode sandbox picks from, in bps (spec section 10). */
 export const SANDBOX_FALLS_BPS = [150, 250, 400, 600] as const; // every fall pays, so a first try never shows $0
 export const SANDBOX_MAX_CONTRACTS = 200;
-/** Friday price when no NVDAx reference has ever been seen, exponent -5. */
+/** Friday price when no reference for the symbol has ever been seen, exponent -5. */
 export const FALLBACK_FRIDAY_PRICE = 180_00000n;
 
 export interface SandboxChain {
   /** Create a sandbox market and set its Friday price in one transaction (market goes straight to FridayFinal). */
-  createSandboxMarket(mode: SandboxMode, fridayPrice: bigint): Promise<PublicKey>;
+  createSandboxMarket(mode: SandboxMode, fridayPrice: bigint, symbol: string): Promise<PublicKey>;
   readMarket(market: PublicKey): Promise<MarketInfo | null>;
   /** submit_sandbox_price(Monday): closes buying on chain. */
   submitMondayPrice(market: PublicKey, price: bigint): Promise<void>;
@@ -26,7 +27,8 @@ export interface SandboxChain {
 }
 
 export type SandboxDeps = {
-  reference(): Reference | null;
+  /** Live (or last good) reference for the symbol's token. */
+  reference(symbol: string): Reference | null;
   recordFridayRef(market: PublicKey, price: number): void;
   /** Markets this service created via start(); the bell acts on nothing else. Defaults to an in-memory set. */
   created?: { has(market: string): boolean; add(market: string): void };
@@ -52,13 +54,13 @@ export class Sandbox {
     return this.rung.has(market.toBase58());
   }
 
-  async start(mode: SandboxMode): Promise<{ market: PublicKey; fridayPrice: bigint; mode: SandboxMode }> {
-    const ref = this.d.reference();
+  async start(mode: SandboxMode, symbol = DEFAULT_SYMBOL): Promise<{ market: PublicKey; fridayPrice: bigint; mode: SandboxMode; symbol: string }> {
+    const ref = this.d.reference(symbol);
     const fridayPrice = ref ? BigInt(Math.round(ref.price * 1e5)) : FALLBACK_FRIDAY_PRICE;
-    const market = await this.chain.createSandboxMarket(mode, fridayPrice);
+    const market = await this.chain.createSandboxMarket(mode, fridayPrice, symbol);
     this.created.add(market.toBase58());
     this.d.recordFridayRef(market, ref ? ref.price : Number(fridayPrice) / 1e5);
-    return { market, fridayPrice, mode };
+    return { market, fridayPrice, mode, symbol };
   }
 
   /**
@@ -83,7 +85,7 @@ export class Sandbox {
       fallBps = SANDBOX_FALLS_BPS[Math.min(SANDBOX_FALLS_BPS.length - 1, Math.floor(this.rng() * SANDBOX_FALLS_BPS.length))];
       mondayPrice = (friday * BigInt(10_000 - fallBps)) / 10_000n;
     } else {
-      await this.chain.changeMultiplier(mk.nvdaxMint);
+      await this.chain.changeMultiplier(mk.stockMint);
     }
     await this.chain.submitMondayPrice(market, mondayPrice);
     await this.chain.finaliseMonday(market);
@@ -109,8 +111,18 @@ export type DevnetSetup = {
   demo: Keypair; // demo authority
   quoteKey: PublicKey;
   usdcMint: PublicKey;
-  nvdaxMint: PublicKey;
+  /** NVDA's test mint, the default. */
+  stockMint: PublicKey;
+  /** Test mint per symbol (config/devnet.json testMints). NVDA falls back to stockMint. */
+  testMints?: Record<string, PublicKey>;
 };
+
+/** The devnet test mint the faucet and sandbox use for a symbol. */
+export function testMintFor(s: Pick<DevnetSetup, "stockMint" | "testMints">, symbol: string): PublicKey {
+  const m = s.testMints?.[symbol] ?? (symbol === DEFAULT_SYMBOL ? s.stockMint : undefined);
+  if (!m) throw new Error(`no test mint for ${symbol}`);
+  return m;
+}
 
 async function send(conn: Connection, payer: Keypair, ixs: TransactionInstruction[], signers: Keypair[] = []) {
   const tx = new Transaction().add(...ixs);
@@ -125,6 +137,7 @@ async function send(conn: Connection, payer: Keypair, ixs: TransactionInstructio
 }
 
 export type MarketParams = {
+  feedId: number; // Pyth Pro feed id; exponent is always config.ts EXPONENT
   fridayTargetTs: bigint; // unix seconds, UTC
   mondayTargetTs: bigint;
   buyingCloseTs: bigint;
@@ -145,7 +158,10 @@ export const BOUNTY_PER_LEG = 100_000n;
 
 /** Borsh MarketParams (programs/gap_cover/src/instructions/create_market.rs). */
 export function encodeMarketParams(p: MarketParams): Buffer {
+  const exp = Buffer.alloc(2);
+  exp.writeInt16LE(EXPONENT);
   return Buffer.concat([
+    u32(p.feedId), exp,
     i64(p.fridayTargetTs), i64(p.mondayTargetTs), i64(p.buyingCloseTs),
     u16(BAND_LOWER_BPS), u16(BAND_UPPER_BPS), u16(p.fridayConfCapBps), u16(p.mondayConfCapBps), u16(p.minPublishers),
     u32(p.maxContracts), i64(BOUNTY_PER_LEG),
@@ -153,25 +169,32 @@ export function encodeMarketParams(p: MarketParams): Buffer {
   ]);
 }
 
-/** Borsh MarketParams for a sandbox market. */
-export function encodeSandboxParams(now: bigint, mode: SandboxMode, quoteKey: PublicKey, demo: PublicKey): Buffer {
-  return encodeMarketParams({
+/** MarketParams for a sandbox market of one stock. */
+export function sandboxParams(now: bigint, mode: SandboxMode, quoteKey: PublicKey, demo: PublicKey, m: MarketConfig = marketBySymbol(DEFAULT_SYMBOL)!): MarketParams {
+  return {
+    feedId: m.feedId,
     fridayTargetTs: now, mondayTargetTs: now + 601n, buyingCloseTs: now + 600n, // the program also caps sandbox buying at 600 s
-    fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10, maxContracts: SANDBOX_MAX_CONTRACTS,
-    quoteKey, sandbox: true, demoAuthority: demo, mode,
-  });
+    fridayConfCapBps: m.confCapBps.friday, mondayConfCapBps: m.confCapBps.monday, minPublishers: m.minPublishers,
+    maxContracts: SANDBOX_MAX_CONTRACTS, quoteKey, sandbox: true, demoAuthority: demo, mode,
+  };
 }
 
-/** Market PDA: seeds [market, dealer, friday_target_ts]. */
-export function marketAddress(programId: PublicKey, dealer: PublicKey, fridayTargetTs: bigint): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("market"), dealer.toBuffer(), i64(fridayTargetTs)], programId)[0];
+/** Borsh MarketParams for a sandbox market. */
+export function encodeSandboxParams(now: bigint, mode: SandboxMode, quoteKey: PublicKey, demo: PublicKey, m?: MarketConfig): Buffer {
+  return encodeMarketParams(sandboxParams(now, mode, quoteKey, demo, m));
+}
+
+/** Market PDA: seeds [market, dealer, feed_id u32 LE, friday_target_ts i64 LE]. */
+export function marketAddress(programId: PublicKey, dealer: PublicKey, feedId: number, fridayTargetTs: bigint): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("market"), dealer.toBuffer(), u32(feedId), i64(fridayTargetTs)], programId)[0];
 }
 
 /** create_market. The dealer pays rent and funds both reserves from its USDC account. */
 export function createMarketInstruction(
-  programId: PublicKey, dealer: PublicKey, usdcMint: PublicKey, nvdaxMint: PublicKey, fridayTargetTs: bigint, params: Buffer,
+  programId: PublicKey, dealer: PublicKey, usdcMint: PublicKey, stockMint: PublicKey, p: MarketParams,
 ): { market: PublicKey; ix: TransactionInstruction } {
-  const market = marketAddress(programId, dealer, fridayTargetTs);
+  const market = marketAddress(programId, dealer, p.feedId, p.fridayTargetTs);
+  const params = encodeMarketParams(p);
   const pda = (seed: string) => PublicKey.findProgramAddressSync([Buffer.from(seed), market.toBuffer()], programId)[0];
   const ix = {
     programId,
@@ -180,7 +203,7 @@ export function createMarketInstruction(
       { pubkey: market, isSigner: false, isWritable: true },
       { pubkey: pda("vault"), isSigner: false, isWritable: false },
       { pubkey: usdcMint, isSigner: false, isWritable: false },
-      { pubkey: nvdaxMint, isSigner: false, isWritable: false },
+      { pubkey: stockMint, isSigner: false, isWritable: false },
       { pubkey: pda("escrow"), isSigner: false, isWritable: true },
       { pubkey: pda("collateral"), isSigner: false, isWritable: true },
       { pubkey: pda("bounty"), isSigner: false, isWritable: true },
@@ -210,14 +233,16 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
 
   return {
     readMarket,
-    async createSandboxMarket(mode, fridayPrice) {
-      // Seeds [market, dealer, friday_target_ts]: one sandbox per second; retry the next second on a clash.
+    async createSandboxMarket(mode, fridayPrice, symbol) {
+      const cfg = marketBySymbol(symbol);
+      if (!cfg) throw new Error(`unknown symbol ${symbol}`);
+      // Seeds [market, dealer, feed_id, friday_target_ts]: one sandbox per stock per second; retry the next second on a clash.
       for (let attempt = 0; attempt < 5; attempt++) {
         const now = BigInt(Math.floor(Date.now() / 1000)) + BigInt(attempt);
-        const market = marketAddress(s.programId, s.dealer.publicKey, now);
+        const market = marketAddress(s.programId, s.dealer.publicKey, cfg.feedId, now);
         if (await s.conn.getAccountInfo(market)) continue;
-        const params = encodeSandboxParams(now, mode, s.quoteKey, s.demo.publicKey);
-        let nvdax = s.nvdaxMint;
+        const params = sandboxParams(now, mode, s.quoteKey, s.demo.publicKey, cfg);
+        let stockMint = testMintFor(s, symbol);
         if (mode === "multiplierVoid") { // its own mint, so ringing this bell cannot void other sandbox markets
           const own = Keypair.generate();
           const space = getMintLen([ExtensionType.ScaledUiAmountConfig]);
@@ -227,9 +252,9 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
             createInitializeScaledUiAmountConfigInstruction(own.publicKey, s.dealer.publicKey, 1.0, TOKEN_2022_PROGRAM_ID),
             createInitializeMintInstruction(own.publicKey, 8, s.dealer.publicKey, null, TOKEN_2022_PROGRAM_ID),
           ], [own]);
-          nvdax = own.publicKey;
+          stockMint = own.publicKey;
         }
-        const { ix: create } = createMarketInstruction(s.programId, s.dealer.publicKey, s.usdcMint, nvdax, now, params);
+        const { ix: create } = createMarketInstruction(s.programId, s.dealer.publicKey, s.usdcMint, stockMint, params);
         await send(s.conn, s.dealer, [create, sandboxPrice(market, 0, fridayPrice) as TransactionInstruction], [s.demo]);
         return market;
       }
@@ -248,7 +273,7 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
           { pubkey: market, isSigner: false, isWritable: true },
           { pubkey: pda("vault", market), isSigner: false, isWritable: false },
           { pubkey: s.usdcMint, isSigner: false, isWritable: false },
-          { pubkey: mk.nvdaxMint, isSigner: false, isWritable: false },
+          { pubkey: mk.stockMint, isSigner: false, isWritable: false },
           { pubkey: pda("escrow", market), isSigner: false, isWritable: true },
           { pubkey: pda("collateral", market), isSigner: false, isWritable: true },
           { pubkey: pda("bounty", market), isSigner: false, isWritable: true },
@@ -297,20 +322,24 @@ export type FaucetOptions = {
   solCap?: HourlyCap;
   nowMs?: () => number;
   usdc?: bigint;
-  nvdax?: bigint;
+  /** Test stock tokens, raw units (8 decimals). */
+  stock?: bigint;
+  /** Which stock's test token to send; default NVDA. */
+  symbol?: string;
 };
 
 /**
- * Faucet: demo USDC and a little NVDAx (test) to the judge's wallet, plus a little SOL for Position rent when the
+ * Faucet: demo USDC and a little of the chosen stock's test token to the judge's wallet, plus a little SOL for Position rent when the
  * wallet has almost none. The dealer signs only as mint authority. SOL never comes from the dealer key, because the
  * dealer pays the keeper's reports and finalise calls and must not be drained by fresh wallets.
  */
 export async function faucet(s: DevnetSetup, wallet: PublicKey, o: FaucetOptions = {}) {
   const usdc = o.usdc ?? 100_000_000n;
-  const nvdax = o.nvdax ?? 100_000_000n;
+  const stock = o.stock ?? 100_000_000n;
+  const mint = testMintFor(s, o.symbol ?? DEFAULT_SYMBOL);
   const payer = o.faucetKey ?? s.dealer;
   const usdcAta = getAssociatedTokenAddressSync(s.usdcMint, wallet);
-  const nvdaxAta = getAssociatedTokenAddressSync(s.nvdaxMint, wallet, false, TOKEN_2022_PROGRAM_ID);
+  const stockAta = getAssociatedTokenAddressSync(mint, wallet, false, TOKEN_2022_PROGRAM_ID);
   const ixs: TransactionInstruction[] = [];
   let solLamports = 0;
   if (o.faucetKey && (await s.conn.getBalance(wallet, "confirmed")) < FAUCET_SOL_BELOW_LAMPORTS
@@ -322,8 +351,8 @@ export async function faucet(s: DevnetSetup, wallet: PublicKey, o: FaucetOptions
   ixs.push(
     createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, usdcAta, wallet, s.usdcMint),
     createMintToInstruction(s.usdcMint, usdcAta, s.dealer.publicKey, usdc),
-    createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, nvdaxAta, wallet, s.nvdaxMint, TOKEN_2022_PROGRAM_ID),
-    createMintToInstruction(s.nvdaxMint, nvdaxAta, s.dealer.publicKey, nvdax, [], TOKEN_2022_PROGRAM_ID),
+    createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, stockAta, wallet, mint, TOKEN_2022_PROGRAM_ID),
+    createMintToInstruction(mint, stockAta, s.dealer.publicKey, stock, [], TOKEN_2022_PROGRAM_ID),
   );
   const signature = await send(s.conn, payer, ixs, [s.dealer]);
   return { signature, solLamports };

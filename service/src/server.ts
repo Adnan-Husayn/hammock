@@ -1,17 +1,17 @@
 import { ARCHIVE_PATH, Archive, archiveResponse, deserializeUpdate, serializeUpdate, type Leg, type LegLookup } from "./archive.ts";
-import { streamNvda, type SignedUpdate } from "./pyth.ts";
+import { streamFeeds, type SignedUpdate } from "./pyth.ts";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { solanaChain } from "./chain.ts";
-import { PYTH_ENDPOINTS, SUBMISSION_WINDOW_US, corsOrigin, loadConfig } from "./config.ts";
+import { DEFAULT_SYMBOL, PYTH_ENDPOINTS, SUBMISSION_WINDOW_US, corsOrigin, devnetTestMint, enabledMarkets, loadConfig, marketByFeed, type MarketConfig } from "./config.ts";
 import { StreamHealth, safeError } from "./health.ts";
 import { Alerter } from "./alert.ts";
 import { Keeper, type MarketView } from "./keeper.ts";
-import { nvdaxReference } from "./jupiter.ts";
-import { Freeze, loadGaps } from "./pricing.ts";
+import { stockReference, type Reference } from "./jupiter.ts";
+import { Freeze, gapsPath, loadGaps } from "./pricing.ts";
 import { Quoter, readLastNonce, readMarket, type QuoteResult } from "./quote.ts";
 import { RelayRefused, relay, sandboxMarketCheck, type RelayContext } from "./relay.ts";
 import { FAUCET_SOL_PER_HOUR_LAMPORTS, HourlyCap, Sandbox, devnetSandboxChain, faucet, type DevnetSetup, type SandboxMode } from "./sandbox.ts";
@@ -20,7 +20,10 @@ export type ServiceDeps = {
   quoter: Pick<Quoter, "quote">;
   sandbox: Pick<Sandbox, "start" | "bell">;
   relay(raw: Buffer): Promise<{ transaction: Buffer; user: PublicKey }>;
-  faucet(wallet: PublicKey): Promise<string>;
+  /** Demo USDC plus the chosen stock's test token. */
+  faucet(wallet: PublicKey, symbol: string): Promise<string>;
+  /** Stocks the sandbox and faucet accept, first is the default. Defaults to [NVDA]. Served on GET /markets. */
+  symbols?: string[];
   /** Last faucet use per wallet. Defaults to memory; startService persists it under logs/. */
   faucetCooldown?: { get(k: string): number | undefined; set(k: string, t: number): void; delete(k: string): void };
   relayPayer: PublicKey;
@@ -131,6 +134,12 @@ export function serviceServer(d: ServiceDeps): Server {
   const faucetAll = new RateLimit(FAUCET_PER_MINUTE);
   const relayIp = new RateLimit(RELAY_PER_MINUTE_IP);
   const relayUser = new RateLimit(RELAY_PER_MINUTE_USER);
+  const symbols = d.symbols?.length ? d.symbols : [DEFAULT_SYMBOL];
+  const symbolOf = (v: unknown) => {
+    if (v === undefined || v === null) return symbols.includes(DEFAULT_SYMBOL) ? DEFAULT_SYMBOL : symbols[0];
+    if (typeof v !== "string" || !symbols.includes(v.toUpperCase())) throw new HttpError(400, `symbol must be one of ${symbols.join(", ")}`);
+    return v.toUpperCase();
+  };
   return createServer(async (req, res: ServerResponse) => {
     // The archive and health are public, so any page may read them; everything else is for the app.
     const path = (req.url ?? "/").split("?")[0];
@@ -152,6 +161,8 @@ export function serviceServer(d: ServiceDeps): Server {
       }
       if (route === "GET /health" && d.health) return send(200, d.health());
       switch (route) {
+        case "GET /markets":
+          return send(200, { symbols });
         case "GET /quote": {
           const market = pubkey(url.searchParams.get("market"), "market");
           const buyer = pubkey(url.searchParams.get("buyer"), "buyer");
@@ -160,10 +171,11 @@ export function serviceServer(d: ServiceDeps): Server {
           return r.ok ? send(200, quoteJson(r)) : send(409, { error: r.reason });
         }
         case "POST /sandbox/start": {
-          const { mode } = await body(req);
+          const { mode, symbol } = await body(req);
           if (mode !== "gap" && mode !== "multiplierVoid") throw new HttpError(400, "mode must be gap or multiplierVoid");
-          const r = await d.sandbox.start(mode as SandboxMode);
-          return send(200, { market: r.market.toBase58(), fridayPrice: r.fridayPrice.toString(), mode: r.mode, relayPayer: d.relayPayer.toBase58() });
+          const sym = symbolOf(symbol);
+          const r = await d.sandbox.start(mode as SandboxMode, sym);
+          return send(200, { market: r.market.toBase58(), fridayPrice: r.fridayPrice.toString(), mode: r.mode, symbol: sym, relayPayer: d.relayPayer.toBase58() });
         }
         case "POST /sandbox/bell": {
           const market = pubkey((await body(req)).market, "market");
@@ -182,14 +194,16 @@ export function serviceServer(d: ServiceDeps): Server {
           return send(200, { transaction: out.transaction.toString("base64") });
         }
         case "POST /faucet": {
-          const wallet = pubkey((await body(req)).wallet, "wallet");
+          const b = await body(req);
+          const wallet = pubkey(b.wallet, "wallet");
+          const sym = symbolOf(b.symbol);
           const k = wallet.toBase58();
           const t = now();
           if (t - (lastFaucet.get(k) ?? -Infinity) < FAUCET_COOLDOWN_MS) throw new HttpError(429, "faucet already used for this wallet, try again later");
           if (!faucetAll.take("all", t)) throw new HttpError(429, "faucet is busy, try again in a minute");
           lastFaucet.set(k, t);
           try {
-            return send(200, { signature: await d.faucet(wallet) });
+            return send(200, { signature: await d.faucet(wallet, sym) });
           } catch (e) {
             lastFaucet.delete(k); // a failed drip does not count against the wallet
             throw e;
@@ -309,7 +323,8 @@ export function autoStopProblem(env: NodeJS.ProcessEnv, realMarkets: number): st
 /** What startService reaches the network for; tests replace these. */
 export type ServiceOverrides = {
   conn?: Connection;
-  reference?: typeof nvdaxReference;
+  /** Jupiter reference for a mainnet xStocks mint. */
+  reference?: (mainnetMint: string) => Promise<Reference | null>;
   stream?: (onUpdate: (u: SignedUpdate) => void, onFrame: (url: string) => void) => () => void;
   nowMs?: () => number;
   keeperIntervalMs?: number;
@@ -334,17 +349,20 @@ function markArchive(path: string) {
       }
     }
   }
-  let targets: bigint[] = [];
+  // Each real market's two marks, for that market's feed only.
+  let windows: { feedId: number; targetUs: bigint }[] = [];
   let halfWindowUs = 0n;
+  const wanted = (u: SignedUpdate) =>
+    windows.some((w) => w.feedId === u.feedId && (u.feedTsUs >= w.targetUs ? u.feedTsUs - w.targetUs : w.targetUs - u.feedTsUs) <= halfWindowUs);
   return {
     archive,
-    setWindows(t: bigint[], half: bigint) {
-      targets = t;
+    setWindows(w: { feedId: number; targetUs: bigint }[], half: bigint) {
+      windows = w;
       halfWindowUs = half;
-      archive.prune(t, half);
+      archive.retain(wanted);
     },
     add(u: SignedUpdate) {
-      if (!targets.some((t) => (u.feedTsUs >= t ? u.feedTsUs - t : t - u.feedTsUs) <= halfWindowUs)) return;
+      if (!wanted(u)) return;
       if (!archive.add(u)) return;
       mkdirSync(dirname(path), { recursive: true });
       appendFileSync(path, JSON.stringify(serializeUpdate(u)) + "\n");
@@ -373,8 +391,24 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   if (!faucetKey) console.warn("FAUCET_KEYPAIR is not set: the faucet sends tokens only, no SOL");
   const solCap = new HourlyCap(FAUCET_SOL_PER_HOUR_LAMPORTS);
   const conn = over.conn ?? new Connection(cfg.rpcUrl, "confirmed");
-  const reference = over.reference ?? nvdaxReference;
-  const freeze = new Freeze();
+  const reference = over.reference ?? ((mint: string) => stockReference(mint));
+  const markets = enabledMarkets(env);
+  if (markets.length === 0) throw new Error("no enabled markets");
+  // Per stock: freeze rule state and gap history. A stock without a gaps file is not priced (quotes refuse).
+  const perSymbol = new Map<string, { cfg: MarketConfig; freeze: Freeze; gaps: number[] | null }>();
+  for (const cfg of markets) {
+    let gaps: number[] | null = null;
+    try {
+      gaps = loadGaps(gapsPath(cfg.gapsFile));
+    } catch (e) {
+      console.error(`${cfg.symbol}: no gap history (${cfg.gapsFile}); quotes for it are refused. Run node scripts/build-gaps.mjs ${cfg.symbol}`);
+    }
+    perSymbol.set(cfg.symbol, { cfg, freeze: new Freeze(), gaps });
+  }
+  const bySymbolFeed = (feedId: number) => {
+    const c = marketByFeed(feedId);
+    return c ? perSymbol.get(c.symbol) : undefined;
+  };
   const refs = new FridayRefs(env.FRIDAY_REFS_PATH ?? join(ROOT, "logs", "friday-refs.json"));
   const realMarkets = (env.REAL_MARKETS ?? "").split(",").filter(Boolean).map((s) => new PublicKey(s));
   const alerter = new Alerter(env.ALERT_WEBHOOK_URL, over.alertFetch, nowMs);
@@ -390,35 +424,54 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     const known = mks.filter((m) => m !== null);
     markTargets = known.flatMap((m) => [m.eligibility.fridayTargetUs, m.eligibility.mondayTargetUs]);
     marks.setWindows(
-      markTargets,
+      known.flatMap((m) => [m.eligibility.fridayTargetUs, m.eligibility.mondayTargetUs].map((targetUs) => ({ feedId: m.eligibility.feedId, targetUs }))),
       known.reduce((h, m) => (m.eligibility.halfWindowUs > h ? m.eligibility.halfWindowUs : h), 0n),
     );
   };
   await refreshWindows().catch(() => {});
   setInterval(() => refreshWindows().catch(() => {}), 60_000).unref();
 
-  // Reference refresh every 15 s, for the freeze rule. The keepers record f_x.
+  // Reference refresh every 15 s per stock, for the freeze rule. The keepers record f_x.
   const tick = async () => {
-    freeze.update(await reference(), Date.now());
+    await Promise.all([...perSymbol.values()].map(async (p) => {
+      p.freeze.update(await reference(p.cfg.mainnetMint).catch(() => null), Date.now());
+    }));
   };
   await tick().catch(() => {});
   setInterval(() => tick().catch(() => {}), 15_000).unref();
 
+  // Test mints per enabled stock; a stock with none cannot be used in the sandbox or faucet.
+  const testMints: Record<string, PublicKey> = {};
+  for (const cfg of markets) {
+    const m = devnetTestMint(devnet, cfg.symbol);
+    if (m) testMints[cfg.symbol] = new PublicKey(m);
+    else console.warn(`${cfg.symbol}: no devnet test mint in config/devnet.json (testMints); sandbox and faucet skip it`);
+  }
+  const sandboxSymbols = markets.map((m) => m.symbol).filter((sym) => testMints[sym] && perSymbol.get(sym)!.gaps);
   const setup: DevnetSetup = {
     conn, programId, dealer, demo, quoteKey: quoteKey.publicKey,
-    usdcMint: new PublicKey(devnet.usdcDemo.mint), nvdaxMint: new PublicKey(devnet.nvdaxTest.mint),
+    usdcMint: new PublicKey(devnet.usdcDemo.mint),
+    stockMint: testMints[DEFAULT_SYMBOL] ?? Object.values(testMints)[0] ?? PublicKey.default,
+    testMints,
   };
   const sandbox = new Sandbox(devnetSandboxChain(setup), {
-    reference: () => freeze.current ?? freeze.lastGood,
+    reference: (symbol) => {
+      const f = perSymbol.get(symbol)?.freeze;
+      return f ? (f.current ?? f.lastGood) : null;
+    },
     recordFridayRef: (m, p) => refs.set(m, p),
     created: new PersistedSet(env.SANDBOX_MARKETS_PATH ?? join(ROOT, "logs", "sandbox-markets.json")),
   });
   const quoter = new Quoter({
     readMarket: (m) => readMarket(conn, programId, m),
     readLastNonce: (m, b) => readLastNonce(conn, programId, m, b),
-    freeze,
+    freeze: perSymbol.values().next().value!.freeze,
+    gaps: [],
+    forFeed: (feedId) => {
+      const p = bySymbolFeed(feedId);
+      return p && p.gaps ? { freeze: p.freeze, gaps: p.gaps } : undefined;
+    },
     fridayRef: (m) => refs.get(m),
-    gaps: loadGaps(),
     quoteKey,
     nowMs: Date.now,
     bellRung: (m) => sandbox.bellRung(m),
@@ -450,7 +503,8 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     quoter,
     sandbox,
     relay: (raw) => relay(raw, relayCtx, feePayer),
-    faucet: async (w) => (await faucet(setup, w, { faucetKey, solCap, nowMs })).signature,
+    faucet: async (w, symbol) => (await faucet(setup, w, { faucetKey, solCap, nowMs, symbol })).signature,
+    symbols: sandboxSymbols,
     faucetCooldown: new PersistedCooldown(env.FAUCET_COOLDOWN_PATH ?? join(ROOT, "logs", "faucet-cooldown.json"), FAUCET_COOLDOWN_MS),
     relayPayer: feePayer.publicKey,
     relayBalance: () => conn.getBalance(feePayer.publicKey, "confirmed"),
@@ -459,7 +513,9 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   });
   let stopStream = () => {};
   try {
-    const stream = over.stream ?? ((f, onFrame) => streamNvda(f, { onFrame }));
+    // Every enabled stock plus any real market's feed, on one subscription.
+    const feedIds = [...new Set(markets.map((m) => m.feedId))];
+    const stream = over.stream ?? ((f, onFrame) => streamFeeds(feedIds, f, { onFrame }));
     stopStream = stream((u) => marks.add(u), (url) => streamHealth.frame(url, nowMs()));
   } catch (e) {
     // Real markets need their marks archived; only a sandbox-only run may go without the stream.
@@ -468,7 +524,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     console.error(`no report stream, sandbox only: ${why}`);
   }
   // One keeper per real market, each with its own memory of rejected reports. The dealer pays their fees.
-  const keeperStatus = realMarkets.map((m) => ({ market: m.toBase58(), state: null as string | null, lastTickMs: null as number | null, lastSuccessMs: null as number | null, consecutiveFailures: 0, fridayRefMissed: false }));
+  const keeperStatus = realMarkets.map((m) => ({ market: m.toBase58(), symbol: null as string | null, state: null as string | null, lastTickMs: null as number | null, lastSuccessMs: null as number | null, consecutiveFailures: 0, fridayRefMissed: false }));
   const retryRefAt = new Map<string, number>();
   const handOverFridayRef = async (market: string, view: MarketView) => {
     const key = new PublicKey(market);
@@ -487,7 +543,9 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     }
     if (nowMs() < (retryRefAt.get(market) ?? 0)) return;
     retryRefAt.set(market, nowMs() + 5_000); // the keeper ticks each second; do not hammer a quote route that is down
-    const ref = await reference();
+    const cfg = marketByFeed(view.params.friday.feedId);
+    if (!cfg) return; // a feed this service has no token for: f_x stays unset and quotes refuse
+    const ref = await reference(cfg.mainnetMint);
     if (ref) refs.set(key, ref.price);
   };
   const chain = solanaChain(conn, programId, dealer);
@@ -497,6 +555,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
       async readMarket(market: string) {
         const view = await chain.readMarket(market);
         status.state = view.state ?? null;
+        status.symbol = marketByFeed(view.params.friday.feedId)?.symbol ?? null;
         return view;
       },
     };
@@ -535,6 +594,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
       endpoints: streamHealth.report(now),
       markets: keeperStatus.map((k) => ({
         market: k.market,
+        symbol: k.symbol,
         state: k.state,
         lastTickAgeS: age(k.lastTickMs),
         lastSuccessAgeS: age(k.lastSuccessMs),

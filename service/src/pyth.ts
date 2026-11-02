@@ -3,6 +3,8 @@ import WebSocket from "ws";
 import { FEED_ID, PYTH_ENDPOINTS, pythToken } from "./config.ts";
 
 export type SignedUpdate = {
+  /** The feed this update is for. One signed message can carry several feeds; each gets its own SignedUpdate. */
+  feedId: number;
   messageHex: string;
   feedTsUs: bigint;
   timestampUs: bigint;
@@ -97,6 +99,7 @@ export function parseStreamMessage(m: any, feedId = FEED_ID): SignedUpdate | nul
     const bytes = Buffer.from(data, "hex");
     const d = decodeSolanaMessage(bytes, feedId);
     const u: SignedUpdate = {
+      feedId,
       messageHex: data,
       feedTsUs: BigInt(feed.feedUpdateTimestamp),
       timestampUs: BigInt(m.parsed.timestampUs),
@@ -116,17 +119,22 @@ export function parseStreamMessage(m: any, feedId = FEED_ID): SignedUpdate | nul
   }
 }
 
-const SUBSCRIBE = {
+/** Every feed of one streamUpdated message that decodes and agrees with its signed bytes. */
+export function parseStreamUpdates(m: any, feedIds: readonly number[]): SignedUpdate[] {
+  return feedIds.map((id) => parseStreamMessage(m, id)).filter((u): u is SignedUpdate => u !== null);
+}
+
+const subscribe = (feedIds: readonly number[]) => ({
   type: "subscribe",
   subscriptionId: 1,
-  priceFeedIds: [FEED_ID],
+  priceFeedIds: [...feedIds],
   properties: ["price", "exponent", "confidence", "publisherCount", "marketSession", "feedUpdateTimestamp"],
   formats: ["solana"],
   deliveryFormat: "json",
   jsonBinaryEncoding: "hex",
   parsed: true,
   channel: "fixed_rate@200ms",
-};
+});
 
 export type SocketLike = {
   on(ev: "open" | "message" | "error" | "close", cb: (...a: any[]) => void): unknown;
@@ -144,11 +152,19 @@ export type StreamOpts = {
   onFrame?: (url: string) => void;
 };
 
-/**
- * Stream NVDA from all three endpoints at once (dedup is the archive's job). Each socket has an idle
- * watchdog (no frame for idleMs -> terminate and reconnect) with exponential backoff. Returns a stop function.
- */
+/** NVDA only; kept for callers that stream one feed. */
 export function streamNvda(onUpdate: (u: SignedUpdate) => void, opts: StreamOpts = {}): () => void {
+  return streamFeeds([FEED_ID], onUpdate, opts);
+}
+
+/**
+ * Stream every given feed on one subscription, from all three endpoints at once (dedup is the archive's job). Each
+ * socket has an idle watchdog (no frame for idleMs -> terminate and reconnect) with exponential backoff. Each feed in a
+ * frame becomes its own SignedUpdate over the same signed bytes. Returns a stop function.
+ */
+export function streamFeeds(feedIds: readonly number[], onUpdate: (u: SignedUpdate) => void, opts: StreamOpts = {}): () => void {
+  if (feedIds.length === 0) throw new Error("no feeds to stream");
+  const SUBSCRIBE = subscribe(feedIds);
   const endpoints = opts.endpoints ?? PYTH_ENDPOINTS;
   const idleMs = opts.idleMs ?? 3000;
   const [minBack, maxBack] = opts.backoffMs ?? [1000, 15000];
@@ -185,8 +201,7 @@ export function streamNvda(onUpdate: (u: SignedUpdate) => void, opts: StreamOpts
       opts.onFrame?.(url);
       next = minBack; // a live socket resets the backoff
       try {
-        const u = parseStreamMessage(JSON.parse(String(b)));
-        if (u) onUpdate(u);
+        for (const u of parseStreamUpdates(JSON.parse(String(b)), feedIds)) onUpdate(u);
       } catch {
         // a malformed frame is dropped; the other endpoints keep delivering
       }

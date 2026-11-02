@@ -28,7 +28,7 @@ export type KeeperOptions = {
 };
 
 export class Keeper {
-  private rejected = new Set<string>();
+  private rejected = new Set<string>(); // `${market}:${hash}`: one message can carry several feeds
   private submitted = new Map<string, bigint>(); // `${market}:${leg}` -> best feedTs we got accepted
 
   private archive: Archive;
@@ -44,15 +44,17 @@ export class Keeper {
     this.opts = opts;
   }
 
-  isRejected(hash: string) {
-    return this.rejected.has(hash);
+  /** Whether this keeper saw the report rejected, on `market` when given, otherwise on any market. */
+  isRejected(hash: string, market?: string) {
+    if (market !== undefined) return this.rejected.has(`${market}:${hash}`);
+    return [...this.rejected].some((k) => k.endsWith(`:${hash}`));
   }
 
   /** One pass over both legs. Safe to call repeatedly. */
   async tick(market: string): Promise<void> {
     const view = await this.chain.readMarket(market);
     const now = this.nowUs();
-    if (this.opts.prune !== false) this.archive.prune([view.targetUs.friday, view.targetUs.monday], view.params.friday.halfWindowUs);
+    if (this.opts.prune !== false) this.archive.prune([view.targetUs.friday, view.targetUs.monday], view.params.friday.halfWindowUs, view.params.friday.feedId);
     let firstError: unknown;
     const handOver = async (v: MarketView) => {
       if (v.state === "FridayFinal") await this.opts.onFridayFinal?.(market, v);
@@ -88,11 +90,11 @@ export class Keeper {
     const bar = [onChain, mine].filter((x): x is bigint => x != null).map((x) => rankKey(x, t))
       .reduce<ReturnType<typeof rankKey> | null>((b, k) => (b && !rankLess(k, b) ? b : k), null);
     for (const u of this.archive.eligible(t, view.params[leg])) {
-      if (this.rejected.has(u.hash)) continue;
+      if (this.rejected.has(`${market}:${u.hash}`)) continue;
       // Candidates come best first; the first live one decides whether anything is worth sending.
       if (bar && !rankLess(rankKey(u.feedTsUs, t), bar)) return;
       if (await this.chain.submitReport(market, leg, u)) this.submitted.set(key, u.feedTsUs);
-      else this.rejected.add(u.hash);
+      else this.rejected.add(`${market}:${u.hash}`);
       return; // one transaction per tick per leg; a rejected one is skipped on the next
     }
   }

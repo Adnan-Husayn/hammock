@@ -106,7 +106,7 @@ export function finaliseInstruction(
       rw(market),
       ro(vault),
       ro(mk.usdcMint),
-      ro(mk.nvdaxMint),
+      ro(mk.stockMint),
       rw(mk.escrow),
       rw(mk.collateralReserve),
       rw(mk.bountyReserve),

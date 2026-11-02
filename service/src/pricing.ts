@@ -35,14 +35,18 @@ export function premiumPerContract(inputs: PriceInputs): number | null {
   return units >= MAX_PREMIUM * BASE_UNITS ? null : units / BASE_UNITS;
 }
 
-const GAPS_CSV = join(dirname(fileURLToPath(import.meta.url)), "..", "data", "nvda-gaps.csv");
+const DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "data");
+const GAPS_CSV = join(DATA_DIR, "nvda-gaps.csv");
+
+/** Path of a gaps file named in config.ts MARKETS. */
+export const gapsPath = (file: string) => join(DATA_DIR, file);
 
 /** Historical weekend gaps (decimals, positive = fall) from the committed CSV. Lines starting with # are notes. */
 export function loadGaps(path = GAPS_CSV): number[] {
   const lines = readFileSync(path, "utf8").split(/\r?\n/).filter((l) => l.trim() && !l.startsWith("#"));
   const header = lines.shift()!.split(",");
   const col = header.indexOf("gap");
-  if (col < 0) throw new Error("nvda-gaps.csv has no gap column");
+  if (col < 0) throw new Error(`${path} has no gap column`);
   return lines.map((l) => Number(l.split(",")[col]));
 }
 
@@ -52,7 +56,7 @@ export const FREEZE_MAX_ROUND_TRIP_BPS = 100;
 export const FREEZE_LIFT_MS = 15 * 60_000;
 
 /**
- * Freeze rule (spec section 7): no quotes while the NVDAx price moved more than 5% within 30 minutes, the round trip
+ * Freeze rule (spec section 7): no quotes while the token's price moved more than 5% within 30 minutes, the round trip
  * costs more than 100 bps, or Jupiter returned no route. It lifts by itself once 15 minutes pass with none of those
  * true. There is no manual override. Sandbox markets ignore it and price off `lastGood`.
  */

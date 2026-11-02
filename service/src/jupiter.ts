@@ -1,7 +1,8 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 
-// Mainnet. NVDAx is the xStocks NVIDIA token (Token-2022, 8 decimals, scaled-UI multiplier).
-export const NVDAX_MINT = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh";
+// Mainnet. xStocks tokens are Token-2022, 8 decimals, scaled-UI multiplier. STOCK_MINT is NVDAx, the default; the
+// per-symbol mints are in config.ts MARKETS.
+export const STOCK_MINT = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh";
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const JUPITER_QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote";
 export const MAINNET_RPC = "https://api.mainnet-beta.solana.com";
@@ -22,12 +23,12 @@ async function defaultFetchJson(url: string) {
   return r.json();
 }
 
-/** Reads decimals and the ScaledUiAmount config of the mainnet NVDAx mint. */
-export async function readMainnetMint(rpcUrl = process.env.MAINNET_RPC_URL ?? MAINNET_RPC): Promise<MintInfo> {
+/** Reads decimals and the ScaledUiAmount config of a mainnet xStocks mint. */
+export async function readMainnetMint(mint = STOCK_MINT, rpcUrl = process.env.MAINNET_RPC_URL ?? MAINNET_RPC): Promise<MintInfo> {
   const conn = new Connection(rpcUrl, "confirmed");
-  const acct = await conn.getParsedAccountInfo(new PublicKey(NVDAX_MINT));
+  const acct = await conn.getParsedAccountInfo(new PublicKey(mint));
   const info = (acct.value?.data as any)?.parsed?.info;
-  if (!info) throw new Error("NVDAx mint not found");
+  if (!info) throw new Error(`mint ${mint} not found`);
   const ext = (info.extensions ?? []).find((e: any) => e.extension === "scaledUiAmountConfig")?.state;
   return {
     decimals: info.decimals,
@@ -44,22 +45,25 @@ export function effectiveMultiplier(m: MintInfo, nowS: number): number {
 const quoteUrl = (input: string, output: string, amount: bigint) =>
   `${JUPITER_QUOTE_URL}?inputMint=${input}&outputMint=${output}&amount=${amount}&swapMode=ExactIn&slippageBps=50`;
 
+/** NVDAx reference; see stockReference. */
+export const nvdaxReference = (deps: JupiterDeps = {}) => stockReference(STOCK_MINT, deps);
+
 /**
- * Spec section 7: quote 1,000 USDC -> NVDAx (t raw units), then t NVDAx -> USDC (u).
+ * Spec section 7, for any xStocks mint: quote 1,000 USDC -> token (t raw units), then t token -> USDC (u).
  * shares = t * k / 10^d, price = 1000 / shares, round_trip_bps = (1000 - u) * 10_000 / 1000.
  * Returns null when Jupiter has no route or any call fails (that also trips the freeze).
  */
-export async function nvdaxReference(deps: JupiterDeps = {}): Promise<Reference | null> {
+export async function stockReference(mintAddr: string, deps: JupiterDeps = {}): Promise<Reference | null> {
   const fetchJson = deps.fetchJson ?? defaultFetchJson;
-  const readMint = deps.readMint ?? (() => readMainnetMint());
+  const readMint = deps.readMint ?? (() => readMainnetMint(mintAddr));
   const nowS = deps.nowS ?? (() => Math.floor(Date.now() / 1000));
   try {
     const mint = await readMint();
-    const buy = await fetchJson(quoteUrl(USDC_MINT, NVDAX_MINT, BigInt(PROBE_USDC * 1_000_000)));
+    const buy = await fetchJson(quoteUrl(USDC_MINT, mintAddr, BigInt(PROBE_USDC * 1_000_000)));
     if (!buy?.outAmount) return null;
     const t = BigInt(buy.outAmount);
     if (t <= 0n) return null;
-    const sell = await fetchJson(quoteUrl(NVDAX_MINT, USDC_MINT, t));
+    const sell = await fetchJson(quoteUrl(mintAddr, USDC_MINT, t));
     if (!sell?.outAmount) return null;
     const u = Number(BigInt(sell.outAmount)) / 1_000_000;
     const k = effectiveMultiplier(mint, nowS());

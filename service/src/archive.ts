@@ -1,11 +1,12 @@
 import { createServer, type Server } from "node:http";
+import { FEED_ID } from "./config.ts";
 import type { SignedUpdate } from "./pyth.ts";
 
 export type Leg = "friday" | "monday";
 
 /** Mirrors the on-chain Market fields used by check_eligible. */
 export type EligibilityParams = {
-  feedId: number; // carried for the caller; the stream only ever carries one feed
+  feedId: number; // an update for any other feed is never eligible
   exponent: number;
   halfWindowUs: bigint;
   confCapBps: number;
@@ -26,6 +27,7 @@ export function rankLess(a: RankKey, b: RankKey): boolean {
 
 /** pyth.rs check_eligible; true only when every bullet passes. */
 export function isEligible(u: SignedUpdate, targetUs: bigint, p: EligibilityParams): boolean {
+  if (u.feedId !== p.feedId) return false;
   if (u.session !== "regular") return false;
   if (u.feedTsUs !== u.timestampUs) return false;
   const d = u.feedTsUs - targetUs;
@@ -37,29 +39,43 @@ export function isEligible(u: SignedUpdate, targetUs: bigint, p: EligibilityPara
   return true;
 }
 
+/** One signed message can carry several feeds, so entries are keyed by feed and message hash. */
+const entryKey = (u: SignedUpdate) => `${u.feedId}:${u.hash}`;
+
 export class Archive {
   private byHash = new Map<string, SignedUpdate>();
 
   add(u: SignedUpdate): boolean {
-    if (this.byHash.has(u.hash)) return false;
-    this.byHash.set(u.hash, u);
+    const k = entryKey(u);
+    if (this.byHash.has(k)) return false;
+    this.byHash.set(k, u);
     return true;
+  }
+
+  /** Keep only entries for which `keep` is true; returns how many were dropped. */
+  retain(keep: (u: SignedUpdate) => boolean): number {
+    let n = 0;
+    for (const [k, u] of this.byHash) {
+      if (!keep(u)) {
+        this.byHash.delete(k);
+        n++;
+      }
+    }
+    return n;
   }
 
   get size() {
     return this.byHash.size;
   }
 
-  /** Drop entries outside every [T - halfWindow, T + halfWindow]; they can never be eligible for those legs. */
-  prune(targetsUs: bigint[], halfWindowUs: bigint): number {
-    let n = 0;
-    for (const [h, u] of this.byHash) {
-      if (!targetsUs.some((t) => (u.feedTsUs >= t ? u.feedTsUs - t : t - u.feedTsUs) <= halfWindowUs)) {
-        this.byHash.delete(h);
-        n++;
-      }
-    }
-    return n;
+  /**
+   * Drop entries outside every [T - halfWindow, T + halfWindow]; they can never be eligible for those legs. With
+   * `feedId`, entries for other feeds are dropped too.
+   */
+  prune(targetsUs: bigint[], halfWindowUs: bigint, feedId?: number): number {
+    return this.retain((u) =>
+      (feedId === undefined || u.feedId === feedId) &&
+      targetsUs.some((t) => (u.feedTsUs >= t ? u.feedTsUs - t : t - u.feedTsUs) <= halfWindowUs));
   }
 
   /** Eligible updates, best first. Equal keys keep arrival order (stable sort), as the chain keeps the earlier. */
@@ -79,6 +95,7 @@ export type LegLookup = (market: string, leg: Leg) => LegConfig | Promise<LegCon
 
 export function serializeUpdate(u: SignedUpdate) {
   return {
+    feedId: u.feedId,
     messageHex: u.messageHex,
     hash: u.hash,
     feedTsUs: u.feedTsUs.toString(),
@@ -92,8 +109,9 @@ export function serializeUpdate(u: SignedUpdate) {
 }
 
 /** Inverse of serializeUpdate, for the on-disk archive. */
-export function deserializeUpdate(j: ReturnType<typeof serializeUpdate>): SignedUpdate {
-  return { ...j, feedTsUs: BigInt(j.feedTsUs), timestampUs: BigInt(j.timestampUs), price: BigInt(j.price), confidence: BigInt(j.confidence) };
+export function deserializeUpdate(j: Omit<ReturnType<typeof serializeUpdate>, "feedId"> & { feedId?: number }): SignedUpdate {
+  // Lines written before multi-market support carry no feed id; they were all NVDA.
+  return { ...j, feedId: j.feedId ?? FEED_ID, feedTsUs: BigInt(j.feedTsUs), timestampUs: BigInt(j.timestampUs), price: BigInt(j.price), confidence: BigInt(j.confidence) };
 }
 
 export const ARCHIVE_PATH = /^\/archive\/([^/]+)\/(friday|monday)\/?$/;
