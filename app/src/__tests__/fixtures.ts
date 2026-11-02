@@ -8,7 +8,7 @@ export const NOW = Date.UTC(2026, 10, 28, 12, 0, 0);
 
 export function market(o: Partial<MarketInfo> = {}): MarketInfo {
   return {
-    dealer: pk(), usdcMint: pk(), tokenProgram: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), escrow: pk(), collateralReserve: pk(),
+    dealer: pk(), feedId: 1314, usdcMint: pk(), tokenProgram: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), escrow: pk(), collateralReserve: pk(),
     fridayTargetUs: BigInt(NOW - 86_400_000) * 1000n, mondayTargetUs: BigInt(NOW + 2 * 86_400_000) * 1000n,
     buyingCloseTs: BigInt(Math.floor(NOW / 1000) + 86_400), bandLowerBps: 100, bandUpperBps: 500,
     fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10, maxContracts: 10_000, sandbox: false, sandboxMode: "gap",

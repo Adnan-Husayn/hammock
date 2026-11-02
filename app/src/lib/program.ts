@@ -33,7 +33,7 @@ export function payoutPerContract(fall: number): number {
   return Math.min(1, Math.max(0, (fall - BAND_LOWER) / BAND_WIDTH));
 }
 
-/** One contract per $25 of NVDAx: $5,000 -> 200. */
+/** One contract per $25 of the stock token: $5,000 -> 200. */
 export function suggestedContracts(holdingUsd: number): number {
   return Math.max(0, Math.floor(holdingUsd / DOLLARS_PER_CONTRACT));
 }
@@ -50,6 +50,8 @@ export type Candidate = { price: bigint; feedTsUs: bigint; submitter: PublicKey 
 
 export type MarketInfo = {
   dealer: PublicKey;
+  /** Pyth Pro feed id of the stock this market covers. */
+  feedId: number;
   usdcMint: PublicKey;
   tokenProgram: PublicKey;
   escrow: PublicKey;
@@ -103,8 +105,10 @@ export function decodeMarket(data: Uint8Array): MarketInfo {
   if (!hasDisc(data, DISC.market)) throw new Error("not a Market account");
   const r = new Reader(data);
   const dealer = r.pk();
-  r.u8(); r.u8(); r.u32(); r.i16(); // bump, vault_bump, feed_id, exponent
-  r.pk(); // nvdax_mint
+  r.u8(); r.u8(); // bump, vault_bump
+  const feedId = r.u32();
+  r.i16(); // exponent
+  r.pk(); // stock_mint
   const usdcMint = r.pk(), tokenProgram = r.pk(), escrow = r.pk();
   const collateralReserve = r.pk();
   r.pk(); // bounty_reserve
@@ -126,7 +130,7 @@ export function decodeMarket(data: Uint8Array): MarketInfo {
   const buyingClosed = r.bool();
   const settledAt = r.i64();
   return {
-    dealer, usdcMint, tokenProgram, escrow, collateralReserve, fridayTargetUs, mondayTargetUs, buyingCloseTs, bandLowerBps, bandUpperBps,
+    dealer, feedId, usdcMint, tokenProgram, escrow, collateralReserve, fridayTargetUs, mondayTargetUs, buyingCloseTs, bandLowerBps, bandUpperBps,
     fridayConfCapBps, mondayConfCapBps, minPublishers, maxContracts, sandbox, sandboxMode, state, friday, monday,
     contractsSold, totalPremiums, activePositions, payoutPerContract: payout, buyingClosed, settledAt,
   };

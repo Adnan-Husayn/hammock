@@ -42,7 +42,7 @@ describe("copy", () => {
 
   it("sandbox shows Ring the Monday bell after a buy", async () => {
     const d = deps({ market: market({ sandbox: true }) });
-    const { container } = render(<Sandbox deps={d} />);
+    const { container } = render(<Sandbox deps={d} symbol="NVDA" />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: /gap mode/i })));
     await screen.findByText("Total premium"); // the buy button enables once the quote is in
     await act(async () => fireEvent.click(screen.getByRole("button", { name: /^buy/i })));

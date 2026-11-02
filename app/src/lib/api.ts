@@ -1,5 +1,6 @@
 import type { PublicKey, Transaction } from "@solana/web3.js";
 import type { MarketInfo, PositionInfo } from "./program";
+import type { Stock } from "./markets";
 
 export type QuoteJson = {
   market: string;
@@ -26,11 +27,12 @@ export type ArchiveUpdate = {
 
 export type ServiceApi = {
   quote(market: string, buyer: string, contracts: number): Promise<QuoteJson>;
-  startSandbox(mode: "gap" | "multiplierVoid"): Promise<{ market: string; fridayPrice: string; mode: string; relayPayer: string }>;
+  startSandbox(mode: "gap" | "multiplierVoid", symbol: string): Promise<{ market: string; fridayPrice: string; mode: string; symbol?: string; relayPayer: string }>;
   bell(market: string): Promise<{ mode: string; fallBps: number | null; mondayPrice: string }>;
   relayPayer(): Promise<string>;
   relay(txB64: string): Promise<string>;
-  faucet(wallet: string): Promise<string>;
+  /** Demo USDC and the chosen stock's test token. */
+  faucet(wallet: string, symbol: string): Promise<string>;
   archive(market: string, leg: "friday" | "monday"): Promise<ArchiveUpdate[]>;
 };
 
@@ -40,8 +42,8 @@ export type ChainApi = {
   usdcBalance(mint: PublicKey, owner: PublicKey, tokenProgram: PublicKey): Promise<bigint>;
   blockhash(): Promise<string>;
   sendRaw(raw: Uint8Array): Promise<string>;
-  /** Live NVDAx reference price in USD, for the locked-view estimate. */
-  referencePrice(): Promise<number | null>;
+  /** Live reference price in USD of the stock's token (e.g. NVDAx), for the locked-view estimate. */
+  referencePrice(symbol: string): Promise<number | null>;
 };
 
 /** The connected wallet. The app never holds a private key; signing happens in the wallet. */
@@ -52,8 +54,12 @@ export type AppDeps = {
   chain: ChainApi;
   wallet: WalletLike | null;
   programId: PublicKey;
-  /** This weekend's real market, or null when none is configured. */
+  /** This weekend's real market when only one is configured (no realMarkets), or null. */
   realMarket: PublicKey | null;
+  /** This weekend's real market per symbol. When set, it replaces realMarket. */
+  realMarkets?: Record<string, PublicKey | null>;
+  /** Stocks the picker offers, first is the default. Defaults to enabledStocks(). */
+  stocks?: Stock[];
   now?: () => number;
 };
 
@@ -69,11 +75,11 @@ export function httpService(base: string, archiveBase = base): ServiceApi {
   return {
     quote: (market, buyer, contracts) =>
       fetch(`${base}/quote?${new URLSearchParams({ market, buyer, contracts: String(contracts) })}`).then(json),
-    startSandbox: (mode) => post("/sandbox/start", { mode }),
+    startSandbox: (mode, symbol) => post("/sandbox/start", { mode, symbol }),
     bell: (market) => post("/sandbox/bell", { market }),
     relayPayer: () => fetch(`${base}/relay`).then(json).then((v) => v.relayPayer),
     relay: (transaction) => post("/relay", { transaction }).then((v) => v.transaction),
-    faucet: (wallet) => post("/faucet", { wallet }).then((v) => v.signature),
+    faucet: (wallet, symbol) => post("/faucet", { wallet, symbol }).then((v) => v.signature),
     archive: (market, leg) => fetch(`${archiveBase}/archive/${market}/${leg}`).then(json).then((v) => v.updates ?? []),
   };
 }

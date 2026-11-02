@@ -6,14 +6,14 @@ import { netLoss, payoutPerContract, suggestedContracts } from "../lib/program";
 describe("calculator", () => {
   it("a $5,000 holding suggests 200 contracts", () => {
     expect(suggestedContracts(5000)).toBe(200);
-    render(<Calculator />);
+    render(<Calculator symbol="NVDA" />);
     expect(screen.getByTestId("contracts").textContent).toBe("200");
   });
 
   it("net loss at a 2% fall equals $100 - $50 + premium", () => {
     expect(payoutPerContract(0.02)).toBeCloseTo(0.25);
     expect(netLoss(5000, 0.02, 200, 24)).toBeCloseTo(100 - 50 + 24);
-    render(<Calculator premiumPerContract={0.12} />);
+    render(<Calculator symbol="NVDA" premiumPerContract={0.12} />);
     expect(screen.getByTestId("net-loss").textContent).toBe("$74.00");
   });
 
