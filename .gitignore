@@ -6,6 +6,6 @@ logs/
 data/*.csv
 !data/marks.csv
 data/test-*.csv
-superpowers
+.superpowers/
 keys/
 *-keypair.json
