@@ -328,6 +328,8 @@ export type ServiceOverrides = {
   stream?: (onUpdate: (u: SignedUpdate) => void, onFrame: (url: string) => void, feedIds: number[]) => () => void;
   nowMs?: () => number;
   keeperIntervalMs?: number;
+  /** Waits between startup reads of a REAL_MARKETS market; default 5 tries over about 30 s. */
+  startupRetryMs?: number[];
   healthCheckMs?: number;
   /** Replaces fetch for ALERT_WEBHOOK_URL. */
   alertFetch?: ConstructorParameters<typeof Alerter>[1];
@@ -513,12 +515,16 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   });
   // Feeds of the real markets, from chain. A market whose feed is not in MARKETS cannot be streamed or priced.
   const realFeeds: number[] = [];
+  // A transient RPC error must not drop a feed for the weekend: retry, then fail startup so the host restarts us.
+  const waits = over.startupRetryMs ?? [2_000, 4_000, 8_000, 16_000];
   for (const m of realMarkets) {
-    const mk = await readMarket(conn, programId, m).catch(() => null);
-    if (!mk) {
-      console.error(`REAL_MARKETS: ${m.toBase58()} could not be read at startup; its feed is not streamed`);
-      continue;
+    let mk = null;
+    for (let i = 0; ; i++) {
+      mk = await readMarket(conn, programId, m).catch(() => null);
+      if (mk || i >= waits.length) break;
+      await new Promise((r) => setTimeout(r, waits[i]));
     }
+    if (!mk) throw new Error(`REAL_MARKETS: ${m.toBase58()} could not be read after ${waits.length + 1} tries; refusing to start without its feed`);
     if (!marketByFeed(mk.eligibility.feedId)) {
       throw new Error(`REAL_MARKETS: ${m.toBase58()} uses feed ${mk.eligibility.feedId}, which has no entry in config.ts MARKETS`);
     }

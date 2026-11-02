@@ -197,13 +197,14 @@ describe("submit_report transaction size", () => {
     const { submitReportInstructions } = await import("../src/chain.ts");
     const msg = Buffer.from(fixture("regular-2026-10-29").solana.data, "hex");
     expect(msg.length).toBe(158);
+    expect(msg[4 + 64 + 32 + 2 + 4 + 8 + 1]).toBe(1); // exactly one feed in the signed message
     const payer = Keypair.generate();
     const tx = new Transaction().add(...submitReportInstructions(pk(), payer.publicKey, pk(), "friday", msg));
     tx.recentBlockhash = pk().toBase58();
     tx.feePayer = payer.publicKey;
     tx.sign(payer);
     const size = tx.serialize().length;
-    expect(size).toBeLessThan(1232); // 591 bytes with one feed per message
+    expect(size).toBeLessThan(700); // 591 bytes with one feed per message; the hard limit is 1232
   });
 });
 

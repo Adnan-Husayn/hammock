@@ -83,6 +83,34 @@ describe("stream feeds through startService", () => {
     expect(r.feeds()).toEqual([1314, 1435]);
   });
 
+  it("retries a real market read that fails at first, then streams its feed", async () => {
+    const c = setup();
+    const data = await marketBytes({ feedId: 1435 });
+    let calls = 0;
+    const conn = {
+      getAccountInfo: async (k: PublicKey) => {
+        if (!k.equals(c.market)) return null;
+        if (++calls <= 2) throw new Error("429 Too Many Requests");
+        return { owner: c.programId, data };
+      },
+      getBalance: async () => 0,
+    } as any;
+    let feeds: number[] = [];
+    servers.push(await startService({ ...c.env, ENABLED_SYMBOLS: "NVDA" }, {
+      conn, reference: async () => null, startupRetryMs: [1, 1, 1, 1], stream: (_f, _o, ids) => { feeds = ids; return () => {}; },
+    }));
+    expect(feeds).toEqual([1314, 1435]);
+  });
+
+  it("refuses to start when a real market cannot be read after the retries", async () => {
+    const c = setup();
+    let calls = 0;
+    const conn = { getAccountInfo: async () => { calls++; throw new Error("RPC down"); }, getBalance: async () => 0 } as any;
+    await expect(startService(c.env, { conn, reference: async () => null, startupRetryMs: [1, 1, 1, 1], stream: () => () => {} }))
+      .rejects.toThrow(/could not be read after 5 tries/);
+    expect(calls).toBeGreaterThanOrEqual(5);
+  });
+
   it("refuses to start when a real market's feed has no config entry", async () => {
     const r = await boot(4242, {});
     await expect(r.p).rejects.toThrow(/feed 4242/);
@@ -141,7 +169,9 @@ describe("report stream failure at startup", () => {
 
   it("refuses to start with real markets configured", async () => {
     const c = setup();
-    await expect(startService(c.env, over)).rejects.toThrow(/PYTH_PRO_TOKEN missing/);
+    const data = await marketBytes();
+    const conn = { getAccountInfo: async (k: PublicKey) => (k.equals(c.market) ? { owner: c.programId, data } : null) } as any;
+    await expect(startService(c.env, { ...over, conn })).rejects.toThrow(/PYTH_PRO_TOKEN missing/);
   });
 
   it("starts a sandbox-only run and logs it", async () => {
@@ -317,7 +347,10 @@ describe("keeper through startService", () => {
   it("counts a failed tick in health and logs it once, without the RPC URL", async () => {
     const c = setup();
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const conn = { getAccountInfo: async () => { throw new Error("fetch failed https://rpc.example/?api-key=hidden"); }, getBalance: async () => 0 } as any;
+    // The two startup reads (mark windows, feeds) succeed; every read after them fails.
+    const ok = await marketBytes();
+    let reads = 0;
+    const conn = { getAccountInfo: async () => { if (reads++ < 2) return { owner: c.programId, data: ok }; throw new Error("fetch failed https://rpc.example/?api-key=hidden"); }, getBalance: async () => 0 } as any;
     const server = await startService(c.env, { conn, keeperIntervalMs: 5, reference: async () => null, stream: () => () => {} });
     servers.push(server);
     if (!server.listening) await new Promise((r) => server.once("listening", r));
@@ -371,7 +404,10 @@ describe("alerts through startService", () => {
     const bodies: string[] = [];
     const alertFetch = async (_u: string, init: { body: string }) => (bodies.push(init.body), { ok: true, status: 200 });
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const conn = { getAccountInfo: async () => { throw new Error("fetch failed https://rpc.example/?api-key=hidden"); }, getBalance: async () => 0 } as any;
+    // The two startup reads (mark windows, feeds) succeed; every read after them fails.
+    const ok = await marketBytes();
+    let reads = 0;
+    const conn = { getAccountInfo: async () => { if (reads++ < 2) return { owner: c.programId, data: ok }; throw new Error("fetch failed https://rpc.example/?api-key=hidden"); }, getBalance: async () => 0 } as any;
     const clock = { now: Number(TS / 1000n) };
     const server = await startService(c.env, { conn, nowMs: () => clock.now, keeperIntervalMs: 5, healthCheckMs: 5, alertFetch, reference: async () => null, stream: () => () => {} });
     servers.push(server);
