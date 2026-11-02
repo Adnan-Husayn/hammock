@@ -341,6 +341,65 @@ describe("keeper through startService", () => {
   });
 });
 
+describe("alerts through startService", () => {
+  it("posts once for many keeper failure ticks, with no secrets", async () => {
+    const c = setup();
+    c.env.ALERT_WEBHOOK_URL = "https://hooks.example/abc";
+    c.env.PYTH_PRO_TOKEN = "super-secret-token";
+    const bodies: string[] = [];
+    const alertFetch = async (_u: string, init: { body: string }) => (bodies.push(init.body), { ok: true, status: 200 });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const conn = { getAccountInfo: async () => { throw new Error("fetch failed https://rpc.example/?api-key=hidden"); }, getBalance: async () => 0 } as any;
+    const clock = { now: Number(TS / 1000n) };
+    const server = await startService(c.env, { conn, nowMs: () => clock.now, keeperIntervalMs: 5, healthCheckMs: 5, alertFetch, reference: async () => null, stream: () => () => {} });
+    servers.push(server);
+    await new Promise((res) => setTimeout(res, 60));
+    expect(bodies.filter((b) => /tick failed/.test(b))).toHaveLength(1); // many failing ticks, one alert
+    log.mockRestore();
+    const all = bodies.join("\n");
+    expect(all).not.toMatch(/api-key|super-secret|KEYPAIR/);
+    expect(JSON.parse(bodies[0])).toMatchObject({ source: "gap-cover-service" });
+  });
+
+  it("posts on a stream silent near a mark", async () => {
+    const c = setup();
+    c.env.ALERT_WEBHOOK_URL = "https://hooks.example/abc";
+    const bodies: string[] = [];
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const data = await marketBytes();
+    const conn = { getAccountInfo: async (k: PublicKey) => (k.equals(c.market) ? { owner: c.programId, data } : null), getBalance: async () => 0 } as any;
+    const clock = { now: Number(TS / 1000n) };
+    const server = await startService(c.env, {
+      conn, nowMs: () => clock.now, keeperIntervalMs: 1_000_000, healthCheckMs: 5, reference: async () => null, stream: () => () => {},
+      alertFetch: async (_u, init) => (bodies.push(init.body), { ok: true, status: 200 }),
+    });
+    servers.push(server);
+    clock.now += 61_000;
+    for (let i = 0; i < 100 && !bodies.some((b) => /silent/.test(b)); i++) await new Promise((res) => setTimeout(res, 10));
+    log.mockRestore();
+    expect(bodies.filter((b) => /silent for 61 s/.test(b))).toHaveLength(3); // one per endpoint
+  });
+
+  it("posts when a market misses its Friday reference", async () => {
+    const c = setup();
+    c.env.ALERT_WEBHOOK_URL = "https://hooks.example/abc";
+    const bodies: string[] = [];
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const data = await marketBytes({ state: { FridayFinal: {} }, friday: { price: new BN(1), feed_ts_us: new BN(TS.toString()), submitter: pk(20) } });
+    const conn = { getAccountInfo: async (k: PublicKey) => (k.equals(c.market) ? { owner: c.programId, data } : null), getBalance: async () => 0 } as any;
+    const server = await startService(c.env, {
+      conn, nowMs: () => Number(TS / 1000n) + 420_000 + 900_000 + 1000, keeperIntervalMs: 5, reference: async () => null, stream: () => () => {},
+      alertFetch: async (_u, init) => (bodies.push(init.body), { ok: true, status: 200 }),
+    });
+    servers.push(server);
+    for (let i = 0; i < 100 && !bodies.length; i++) await new Promise((res) => setTimeout(res, 10));
+    await new Promise((res) => setTimeout(res, 30));
+    log.mockRestore();
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatch(/missed its Friday reference/);
+  });
+});
+
 describe("auto-stop with real markets", () => {
   it("flags REAL_MARKETS on a machine that stops when idle, and nothing else", () => {
     expect(autoStopProblem({ AUTO_STOP_MACHINES: "stop" }, 1)).toMatch(/REAL_MARKETS.*fly\.real\.toml/);

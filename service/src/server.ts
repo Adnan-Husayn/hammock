@@ -8,6 +8,7 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { solanaChain } from "./chain.ts";
 import { PYTH_ENDPOINTS, SUBMISSION_WINDOW_US, corsOrigin, loadConfig } from "./config.ts";
 import { StreamHealth, safeError } from "./health.ts";
+import { Alerter } from "./alert.ts";
 import { Keeper, type MarketView } from "./keeper.ts";
 import { nvdaxReference } from "./jupiter.ts";
 import { Freeze, loadGaps } from "./pricing.ts";
@@ -313,6 +314,8 @@ export type ServiceOverrides = {
   nowMs?: () => number;
   keeperIntervalMs?: number;
   healthCheckMs?: number;
+  /** Replaces fetch for ALERT_WEBHOOK_URL. */
+  alertFetch?: ConstructorParameters<typeof Alerter>[1];
 };
 
 /**
@@ -374,6 +377,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   const freeze = new Freeze();
   const refs = new FridayRefs(env.FRIDAY_REFS_PATH ?? join(ROOT, "logs", "friday-refs.json"));
   const realMarkets = (env.REAL_MARKETS ?? "").split(",").filter(Boolean).map((s) => new PublicKey(s));
+  const alerter = new Alerter(env.ALERT_WEBHOOK_URL, over.alertFetch, nowMs);
   const stopWarning = autoStopProblem(env, realMarkets.length);
   if (stopWarning) console.error(stopWarning);
 
@@ -477,6 +481,7 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     if (BigInt(nowMs()) * 1000n > view.targetUs.friday + SUBMISSION_WINDOW_US + FRIDAY_REF_GRACE_US) {
       const status = keeperStatus.find((k) => k.market === market)!;
       if (!status.fridayRefMissed) console.error(`keeper ${market}: no f_x recorded within 15 minutes of the Friday mark closing; quotes stay refused`);
+      alerter.alert(`fref:${market}`, `market ${market} missed its Friday reference (f_x); real-market quotes are refused until it is set`);
       status.fridayRefMissed = true;
       return;
     }
@@ -510,12 +515,16 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
         status.consecutiveFailures++;
         const why = safeError(error);
         if (why !== lastLogged) console.error(`keeper ${status.market}: ${why}`); // once per distinct failure, not each second
+        alerter.alert(`keeper:${status.market}`, `keeper ${status.market} tick failed (${status.consecutiveFailures} in a row): ${why}`);
         lastLogged = why;
       },
     );
   });
   const healthTimer = setInterval(() => {
-    if (realMarkets.length > 0) for (const line of streamHealth.check(nowMs(), markTargets)) console.error(line);
+    if (realMarkets.length > 0) for (const line of streamHealth.check(nowMs(), markTargets)) {
+      console.error(line);
+      alerter.alert(`stream:${line.split(" ")[1]}`, line);
+    }
   }, over.healthCheckMs ?? 10_000);
   healthTimer.unref();
   health = () => {
