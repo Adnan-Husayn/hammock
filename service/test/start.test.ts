@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { finaliseInstruction, finaliseInstructions } from "../src/chain.ts";
 import { PYTH_ENDPOINTS, corsOrigin } from "../src/config.ts";
 import { decodeMarket } from "../src/quote.ts";
-import { startService } from "../src/server.ts";
+import { autoStopProblem, startService } from "../src/server.ts";
 import type { SignedUpdate } from "../src/pyth.ts";
 import { TS, premarket, regular } from "./helpers.ts";
 
@@ -244,6 +244,24 @@ describe("keeper through startService", () => {
     expect(h.markets[0]).toMatchObject({ fridayRefRecorded: false, fridayRefMissed: true });
   });
 
+  it("clears fridayRefMissed once f_x is added to the file by hand, without a restart", async () => {
+    const c = setup();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await run(c, { state: { FridayFinal: {} }, friday: CAND, nowMs: GRACE_END_MS + 1000, ref: 77 });
+    await until(() => log.mock.calls.length > 0);
+    log.mockRestore();
+    writeFileSync(c.env.FRIDAY_REFS_PATH!, JSON.stringify({ [c.market.toBase58()]: 61.5 }));
+    r.frame(PYTH_ENDPOINTS[0]);
+    let h: any;
+    for (let i = 0; i < 100; i++) {
+      h = await (await fetch(`${r.url}/health`)).json();
+      if (!h.markets[0].fridayRefMissed) break;
+      await new Promise((res) => setTimeout(res, 10));
+    }
+    expect(h.markets[0]).toMatchObject({ fridayRefRecorded: true, fridayRefMissed: false });
+    expect(h.ok).toBe(true);
+  });
+
   it("keeps an f_x recorded before the grace period ended", async () => {
     const c = setup();
     writeFileSync(c.env.FRIDAY_REFS_PATH!, JSON.stringify({ [c.market.toBase58()]: 50 }));
@@ -320,6 +338,38 @@ describe("keeper through startService", () => {
     const n = log.mock.calls.length;
     log.mockRestore();
     expect(n).toBe(0);
+  });
+});
+
+describe("auto-stop with real markets", () => {
+  it("flags REAL_MARKETS on a machine that stops when idle, and nothing else", () => {
+    expect(autoStopProblem({ AUTO_STOP_MACHINES: "stop" }, 1)).toMatch(/REAL_MARKETS.*fly\.real\.toml/);
+    expect(autoStopProblem({ AUTO_STOP_MACHINES: "suspend" }, 1)).toMatch(/suspend/);
+    expect(autoStopProblem({ AUTO_STOP_MACHINES: "off" }, 1)).toBeNull();
+    expect(autoStopProblem({}, 1)).toBeNull();
+    expect(autoStopProblem({ AUTO_STOP_MACHINES: "stop" }, 0)).toBeNull();
+  });
+
+  it("logs the error at startup", async () => {
+    const c = setup();
+    c.env.AUTO_STOP_MACHINES = "stop";
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await start(c, []);
+    const lines = log.mock.calls.flat().join("\n");
+    log.mockRestore();
+    expect(lines).toMatch(/AUTO_STOP_MACHINES=stop/);
+  });
+
+  it("the two Fly configs differ only in the stop settings", () => {
+    const read = (f: string) => readFileSync(join(ROOT, "service", f), "utf8");
+    const sandbox = read("fly.toml"), real = read("fly.real.toml");
+    expect(sandbox).toMatch(/auto_stop_machines = "stop"/);
+    expect(sandbox).toMatch(/AUTO_STOP_MACHINES = "stop"/);
+    expect(real).toMatch(/auto_stop_machines = "off"/);
+    expect(real).toMatch(/AUTO_STOP_MACHINES = "off"/);
+    expect(real).toMatch(/min_machines_running = 1/);
+    const strip = (t: string) => t.split("\n").filter((l) => !/^#|auto_stop|AUTO_STOP|min_machines/i.test(l.trim())).join("\n");
+    expect(strip(real)).toBe(strip(sandbox));
   });
 });
 

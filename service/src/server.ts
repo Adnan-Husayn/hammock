@@ -200,7 +200,7 @@ export function serviceServer(d: ServiceDeps): Server {
       if (e instanceof RelayRefused) return send(400, { error: `relay refused: ${e.message}` });
       const msg = e instanceof Error ? e.message : String(e);
       if (/bell already rung|not a sandbox market/.test(msg)) return send(409, { error: msg });
-      console.error(`request failed: ${msg}`);
+      console.error(`request failed: ${safeError(e)}`);
       return send(500, { error: "internal error" });
     }
   });
@@ -246,11 +246,29 @@ class FridayRefs {
   get(k: PublicKey) {
     return this.m[k.toBase58()];
   }
+  /** Re-reads the file, so an f_x added by hand is picked up without a restart. A bad file keeps what is in memory. */
+  reload() {
+    try {
+      if (existsSync(this.path)) this.m = { ...JSON.parse(readFileSync(this.path, "utf8")), ...this.m };
+    } catch {}
+  }
   set(k: PublicKey, v: number) {
     this.m[k.toBase58()] = v;
     mkdirSync(dirname(this.path), { recursive: true });
     writeFileSync(this.path, JSON.stringify(this.m, null, 2));
   }
+}
+
+/**
+ * The loud startup line for a real-market run on a host that stops idle machines. Fly's proxy stops the machine when
+ * no HTTP traffic arrives, and the outbound stream and keeper timers do not count, so the marks would be missed.
+ * fly.toml mirrors its auto_stop_machines setting into AUTO_STOP_MACHINES; fly.real.toml sets both to "off".
+ */
+export function autoStopProblem(env: NodeJS.ProcessEnv, realMarkets: number): string | null {
+  if (realMarkets === 0) return null;
+  const v = env.AUTO_STOP_MACHINES?.trim().toLowerCase();
+  if (v === undefined || v === "" || v === "off" || v === "false") return null;
+  return `ERROR: REAL_MARKETS is set but AUTO_STOP_MACHINES=${v}: the host may stop this machine when idle and the keeper will miss the marks. Deploy with service/fly.real.toml (docs/deploy-service.md).`;
 }
 
 /** What startService reaches the network for; tests replace these. */
@@ -316,6 +334,8 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   const freeze = new Freeze();
   const refs = new FridayRefs(env.FRIDAY_REFS_PATH ?? join(ROOT, "logs", "friday-refs.json"));
   const realMarkets = (env.REAL_MARKETS ?? "").split(",").filter(Boolean).map((s) => new PublicKey(s));
+  const stopWarning = autoStopProblem(env, realMarkets.length);
+  if (stopWarning) console.error(stopWarning);
 
   const streamHealth = new StreamHealth(PYTH_ENDPOINTS, nowMs());
   let markTargets: bigint[] = [];
@@ -407,7 +427,11 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
   const retryRefAt = new Map<string, number>();
   const handOverFridayRef = async (market: string, view: MarketView) => {
     const key = new PublicKey(market);
-    if (refs.get(key) !== undefined) return;
+    if (refs.get(key) === undefined) refs.reload();
+    if (refs.get(key) !== undefined) {
+      keeperStatus.find((k) => k.market === market)!.fridayRefMissed = false; // set by hand since, so health clears
+      return;
+    }
     // Too long after the mark, today's price is not f_x and would misprice quotes. Quotes refuse until one is set by hand.
     if (BigInt(nowMs()) * 1000n > view.targetUs.friday + SUBMISSION_WINDOW_US + FRIDAY_REF_GRACE_US) {
       const status = keeperStatus.find((k) => k.market === market)!;

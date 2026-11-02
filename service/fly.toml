@@ -1,3 +1,5 @@
+# Sandbox-only config: the machine stops when idle. For a real-market weekend deploy fly.real.toml instead
+# (see docs/deploy-service.md, "Real-market weekends").
 app = "ambergris-moonrise-938"
 primary_region = "iad"
 
@@ -12,6 +14,8 @@ primary_region = "iad"
   RELAY_KEYPAIR = "/run/keys/relay.json"
   SERVICE_PORT = "8787"
   TRUST_PROXY = "1"
+  # Mirrors auto_stop_machines below. The service logs an error at startup when REAL_MARKETS is set and this is not "off".
+  AUTO_STOP_MACHINES = "stop"
 
 [[files]]
   guest_path = "/run/keys/dealer.json"

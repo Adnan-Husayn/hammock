@@ -31,6 +31,7 @@ readable by the container's `node` user, on a path outside the volume described 
 | `DEMO_AUTHORITY_KEYPAIR` | Sandbox demo authority |
 | `RELAY_KEYPAIR` | Sandbox fee payer. Must be a separate key that holds only SOL |
 | `QUOTE_KEYPAIR` | Optional. Quote signing key; the dealer key is used when unset |
+| `FAUCET_KEYPAIR` | Optional. Pays the faucet's SOL drips. Must differ from the dealer and relay keys. When unset the faucet sends tokens only, no SOL |
 
 ## Configuration
 
@@ -45,6 +46,43 @@ readable by the container's `node` user, on a path outside the volume described 
 | `ARCHIVE_PATH`, `FRIDAY_REFS_PATH`, `SANDBOX_MARKETS_PATH` | No | Override the files described below |
 
 With `REAL_MARKETS` set, the service refuses to start without a working report stream.
+
+## Real-market weekends
+
+`service/fly.toml` is for sandbox-only operation: Fly stops the machine when no HTTP traffic arrives and starts it on
+the next request. The outbound Pyth stream and the keeper's timers do not count as traffic, so with that config the
+machine can be stopped at 15:59:30 ET Friday or 09:31:30 ET Monday, and the mark is missed.
+
+`service/fly.real.toml` is the same config with `auto_stop_machines = "off"` and `min_machines_running = 1`. Both
+files also set `AUTO_STOP_MACHINES` in `[env]` to match. When `REAL_MARKETS` is non-empty and `AUTO_STOP_MACHINES` is
+anything but `off`, the service logs an `ERROR: REAL_MARKETS is set but AUTO_STOP_MACHINES=...` line at startup. Fly
+does not tell a machine its own stop setting, so this env var is the only signal; keep it in step if you edit either
+file.
+
+Before Friday (at least an hour before the Friday target, once the market exists):
+
+1. Create the market with `scripts/create-real-market.ts` and note the address it prints.
+2. From the repository root:
+
+        fly deploy -c service/fly.real.toml -e REAL_MARKETS=<market address>
+
+3. Check `fly machine list` shows one machine `started`, and `fly logs` shows no `AUTO_STOP_MACHINES` error.
+4. `GET /health` shows the market and frames from the endpoints.
+
+After settlement (the market is `Settled` or `Voided` on chain and claims are open; claims do not need the keeper):
+
+        fly deploy -c service/fly.toml -e REAL_MARKETS=
+
+This returns to stop-when-idle with no real markets. An external uptime ping on `/health` from 15 minutes before each
+mark is a cheap second guard.
+
+## Alerts
+
+Set `ALERT_WEBHOOK_URL` (optional, a Fly secret since the URL can carry a token) to get a short JSON POST when a
+keeper tick fails, a market misses its Friday reference, or a stream endpoint is silent over 60 s within 10 minutes of
+a mark. The body is `{"text": "...", "source": "gap-cover-service", "atMs": <ms>}`. It carries market addresses
+and error text with URLs removed, never keys or tokens. Each distinct alert is sent at most once per 10 minutes, and
+at most 20 alerts go out per hour. A failing webhook is logged and ignored.
 
 ## TRUST_PROXY
 
@@ -77,8 +115,9 @@ An endpoint silent for more than 60 s within 10 minutes of a mark logs an error 
 Route error-level logs to an alert, as the marks are when it matters.
 
 If `fridayRefMissed` is true, the service was away or had no price route around the mark. Add the market's address
-and the NVDAx reference at the mark to `friday-refs.json`, then restart; the file is read at startup. Until then the
-market takes no real-market quotes, and an error is logged once.
+and the NVDAx reference at the mark to `friday-refs.json`. The keeper re-reads the file within a second and
+`fridayRefMissed` clears; no restart is needed. Until then the market takes no real-market quotes, and an error is
+logged once.
 
 ## Checks after deploying
 
