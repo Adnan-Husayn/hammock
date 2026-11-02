@@ -126,15 +126,33 @@ async function fetchMarket(c: Ctx, market: PublicKey) {
   return c.h.program.coder.accounts.decode("market", Buffer.from(acc.data)) as any;
 }
 
-/** Test seam: finalise_friday arrives in Task 7, so tests move a real market to FridayFinal directly. */
-async function forceFridayFinal(c: Ctx, market: PublicKey) {
-  const acc = c.h.context.getAccount(market)!;
+/**
+ * Overlapping targets so the one signed regular fixture is a valid report for both legs: Friday target 7 s before
+ * MONDAY (fixture at +4.4 s), Monday target MONDAY (fixture at -2.6 s). finalise_friday is allowed from F + 421 s,
+ * which is MONDAY + 414 s, still inside the Monday submission window (MONDAY + 420 s).
+ */
+const OVERLAP = { fridayTargetTs: new BN(MONDAY - 7), mondayTargetTs: new BN(MONDAY), buyingCloseTs: new BN(MONDAY) };
+
+/** Moves a real market to FridayFinal on real paths: the fixture as the Friday report, then finalise_friday. */
+async function realFridayFinal(c: Ctx, market: PublicKey) {
   const m = await fetchMarket(c, market);
-  m.state = { fridayFinal: {} };
-  const enc = await c.h.program.coder.accounts.encode("market", m);
-  const data = Buffer.alloc(acc.data.length);
-  enc.copy(data);
-  c.h.context.setAccount(market, { ...acc, data });
+  const friday = m.fridayTargetTsUs.toNumber() / 1_000_000;
+  await warpTo(c.h.context, friday);
+  const submitter = Keypair.generate();
+  const r = await submit(c, market, "friday", submitter);
+  expect(failed(r), logs(r)).toBe(false);
+  await warpTo(c.h.context, friday + 7 * 60 + 1);
+  const a = addresses(c, friday);
+  const subUsdc = await mintUsdc(c.h.context, c.usdc, submitter.publicKey, 0n);
+  const fin = await c.h.program.methods.finaliseFriday().accounts({
+    caller: c.h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: c.usdc, nvdaxMint: c.nvdax,
+    escrow: a.escrow, collateralReserve: a.collateralReserve, bountyReserve: a.bountyReserve,
+    submitterUsdc: subUsdc, dealerUsdc: c.dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID,
+  }).instruction();
+  const f = sendTx(c.h.context, c.h.payer, [fin]);
+  expect(failed(f), logs(f)).toBe(false);
+  expect((await fetchMarket(c, market)).state).toEqual({ fridayFinal: {} });
+  expect(tokenBalance(c.h.context, subUsdc)).toBe(100_000n);
 }
 
 async function reportIxs(c: Ctx, market: PublicKey, submitter: PublicKey, leg: "friday" | "monday", msg: Buffer) {
@@ -215,9 +233,8 @@ describe("create_market", () => {
 describe("submit_report", () => {
   it("stores the regular fixture as the Monday candidate with its submitter, and keeps it on a tie", async () => {
     const c = await setup();
-    const a = await mustCreate(c);
-    await forceFridayFinal(c, a.market);
-    await warpTo(c.h.context, MONDAY);
+    const a = await mustCreate(c, OVERLAP);
+    await realFridayFinal(c, a.market); // the clock is now MONDAY + 414 s, inside the Monday window
     const first = Keypair.generate();
     const fee0 = c.h.context.getBalance(LAZER_TREASURY)!;
     const r = await submit(c, a.market, "monday", first);
@@ -239,9 +256,8 @@ describe("submit_report", () => {
 
   it("fails WrongInstructionLayout when the Ed25519 instruction is at index 1", async () => {
     const c = await setup();
-    const a = await mustCreate(c);
-    await forceFridayFinal(c, a.market);
-    await warpTo(c.h.context, MONDAY);
+    const a = await mustCreate(c, OVERLAP);
+    await realFridayFinal(c, a.market);
     const msg = fixturePayload(REGULAR);
     const { ix } = await reportIxs(c, a.market, c.h.payer.publicKey, "monday", msg);
     const ed = createEd25519Instruction(msg, 0, ENVELOPE_OFFSET);
@@ -250,9 +266,8 @@ describe("submit_report", () => {
 
   it("fails WrongInstructionLayout when the signed envelope differs from the argument", async () => {
     const c = await setup();
-    const a = await mustCreate(c);
-    await forceFridayFinal(c, a.market);
-    await warpTo(c.h.context, MONDAY);
+    const a = await mustCreate(c, OVERLAP);
+    await realFridayFinal(c, a.market);
     const msg = fixturePayload(REGULAR);
     const { ix } = await reportIxs(c, a.market, c.h.payer.publicKey, "monday", msg);
     // An Ed25519 instruction carrying its own copy of the message, pointing at itself.
@@ -263,16 +278,16 @@ describe("submit_report", () => {
 
   it("fails WindowNotStarted before T", async () => {
     const c = await setup();
-    const a = await mustCreate(c);
-    await forceFridayFinal(c, a.market);
-    await warpTo(c.h.context, MONDAY - 1);
+    const a = await mustCreate(c, { fridayTargetTs: new BN(MONDAY - 7), mondayTargetTs: new BN(MONDAY + 3600), buyingCloseTs: new BN(MONDAY + 3600) });
+    await realFridayFinal(c, a.market);
+    await warpTo(c.h.context, MONDAY + 3599);
     expectError(await submit(c, a.market, "monday"), "WindowNotStarted");
   });
 
   it("fails WindowClosed after T + 7 min", async () => {
     const c = await setup();
-    const a = await mustCreate(c);
-    await forceFridayFinal(c, a.market);
+    const a = await mustCreate(c, OVERLAP);
+    await realFridayFinal(c, a.market);
     await warpTo(c.h.context, MONDAY + 7 * 60 + 1);
     expectError(await submit(c, a.market, "monday"), "WindowClosed");
   });
@@ -286,10 +301,8 @@ describe("submit_report", () => {
 
   it("fails WrongState for a Friday report after FridayFinal", async () => {
     const c = await setup();
-    const friday = MONDAY - 1;
-    const a = await mustCreate(c, { fridayTargetTs: new BN(friday), mondayTargetTs: new BN(MONDAY + 3 * 86400), buyingCloseTs: new BN(MONDAY + 3 * 86400 - 3600) });
-    await forceFridayFinal(c, a.market);
-    await warpTo(c.h.context, friday);
+    const a = await mustCreate(c, OVERLAP);
+    await realFridayFinal(c, a.market);
     expectError(await submit(c, a.market, "friday"), "WrongState");
   });
 
