@@ -78,9 +78,8 @@ Before Friday (at least an hour before the Friday target, once the market exists
    Repeat per stock (TSLA, SPY, AAPL); each gets its own address for the same weekend. The feed id, caps and
    publisher minimum come from `service/src/config.ts`. It refuses holiday weeks, a Friday target less than an hour
    away, and a multiplier change scheduled on the stock's test mint before the Monday target. Early-close Fridays get the 12:59:30 ET target. Buying closes Sunday 17:50 ET
-   (spec section 4). Default `--max-contracts` is 5000, so the dealer needs 5000.20 demo USDC per market for the
-   reserves (20000.80 for four stocks; `create-test-mints.ts` mints only 10000, so mint more or lower
-   `--max-contracts`).
+   (spec section 4). Default `--max-contracts` is 1000, so the dealer needs 1000.20 demo USDC per market for the
+   reserves (4000.80 for four stocks).
    Set `QUOTE_PUBKEY` if the service signs quotes with `QUOTE_KEYPAIR`; it defaults to the dealer key.
 2. From the repository root:
 

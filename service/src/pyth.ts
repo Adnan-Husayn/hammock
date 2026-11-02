@@ -124,10 +124,10 @@ export function parseStreamUpdates(m: any, feedIds: readonly number[]): SignedUp
   return feedIds.map((id) => parseStreamMessage(m, id)).filter((u): u is SignedUpdate => u !== null);
 }
 
-const subscribe = (feedIds: readonly number[]) => ({
+const subscribe = (feedId: number, subscriptionId: number) => ({
   type: "subscribe",
-  subscriptionId: 1,
-  priceFeedIds: [...feedIds],
+  subscriptionId,
+  priceFeedIds: [feedId],
   properties: ["price", "exponent", "confidence", "publisherCount", "marketSession", "feedUpdateTimestamp"],
   formats: ["solana"],
   deliveryFormat: "json",
@@ -158,13 +158,15 @@ export function streamNvda(onUpdate: (u: SignedUpdate) => void, opts: StreamOpts
 }
 
 /**
- * Stream every given feed on one subscription, from all three endpoints at once (dedup is the archive's job). Each
- * socket has an idle watchdog (no frame for idleMs -> terminate and reconnect) with exponential backoff. Each feed in a
- * frame becomes its own SignedUpdate over the same signed bytes. Returns a stop function.
+ * Stream the given feeds from all three endpoints at once (dedup is the archive's job), one subscription per feed on
+ * each socket (subscriptionId i+1 for feedIds[i]). Every signed message then carries one feed, so the submit_report
+ * transaction stays the same size however many stocks are enabled. Each socket has an idle watchdog (no frame for
+ * idleMs -> terminate and reconnect) with exponential backoff. Returns a stop function.
  */
 export function streamFeeds(feedIds: readonly number[], onUpdate: (u: SignedUpdate) => void, opts: StreamOpts = {}): () => void {
   if (feedIds.length === 0) throw new Error("no feeds to stream");
-  const SUBSCRIBE = subscribe(feedIds);
+  const SUBSCRIBES = feedIds.map((id, i) => JSON.stringify(subscribe(id, i + 1)));
+  const feedOf = (m: any): number | undefined => feedIds[Number(m?.subscriptionId) - 1];
   const endpoints = opts.endpoints ?? PYTH_ENDPOINTS;
   const idleMs = opts.idleMs ?? 3000;
   const [minBack, maxBack] = opts.backoffMs ?? [1000, 15000];
@@ -194,14 +196,17 @@ export function streamFeeds(feedIds: readonly number[], onUpdate: (u: SignedUpda
       const t = setTimeout(() => { timers.delete(t); connect(url, Math.min(next * 2, maxBack)); }, next);
       timers.add(t);
     };
-    ws.on("open", () => { ws.send(JSON.stringify(SUBSCRIBE)); arm(); });
+    ws.on("open", () => { for (const s of SUBSCRIBES) ws.send(s); arm(); });
     ws.on("message", (b: unknown) => {
       if (ended) return;
       arm();
       opts.onFrame?.(url);
       next = minBack; // a live socket resets the backoff
       try {
-        for (const u of parseStreamUpdates(JSON.parse(String(b)), feedIds)) onUpdate(u);
+        const m = JSON.parse(String(b));
+        const feed = feedOf(m);
+        const u = feed === undefined ? null : parseStreamMessage(m, feed);
+        if (u) onUpdate(u);
       } catch {
         // a malformed frame is dropped; the other endpoints keep delivering
       }

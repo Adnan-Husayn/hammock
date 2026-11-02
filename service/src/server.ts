@@ -325,7 +325,7 @@ export type ServiceOverrides = {
   conn?: Connection;
   /** Jupiter reference for a mainnet xStocks mint. */
   reference?: (mainnetMint: string) => Promise<Reference | null>;
-  stream?: (onUpdate: (u: SignedUpdate) => void, onFrame: (url: string) => void) => () => void;
+  stream?: (onUpdate: (u: SignedUpdate) => void, onFrame: (url: string) => void, feedIds: number[]) => () => void;
   nowMs?: () => number;
   keeperIntervalMs?: number;
   healthCheckMs?: number;
@@ -511,12 +511,25 @@ export async function startService(env: NodeJS.ProcessEnv = process.env, over: S
     trustProxy: env.TRUST_PROXY === "1" || env.TRUST_PROXY === "true",
     archive: { archive: marks.archive, lookup: archiveLookup },
   });
+  // Feeds of the real markets, from chain. A market whose feed is not in MARKETS cannot be streamed or priced.
+  const realFeeds: number[] = [];
+  for (const m of realMarkets) {
+    const mk = await readMarket(conn, programId, m).catch(() => null);
+    if (!mk) {
+      console.error(`REAL_MARKETS: ${m.toBase58()} could not be read at startup; its feed is not streamed`);
+      continue;
+    }
+    if (!marketByFeed(mk.eligibility.feedId)) {
+      throw new Error(`REAL_MARKETS: ${m.toBase58()} uses feed ${mk.eligibility.feedId}, which has no entry in config.ts MARKETS`);
+    }
+    realFeeds.push(mk.eligibility.feedId);
+  }
   let stopStream = () => {};
   try {
-    // Every enabled stock plus any real market's feed, on one subscription.
-    const feedIds = [...new Set(markets.map((m) => m.feedId))];
+    // Every enabled stock plus every real market's feed, one subscription each.
+    const feedIds = [...new Set([...markets.map((m) => m.feedId), ...realFeeds])];
     const stream = over.stream ?? ((f, onFrame) => streamFeeds(feedIds, f, { onFrame }));
-    stopStream = stream((u) => marks.add(u), (url) => streamHealth.frame(url, nowMs()));
+    stopStream = stream((u) => marks.add(u), (url) => streamHealth.frame(url, nowMs()), feedIds);
   } catch (e) {
     // Real markets need their marks archived; only a sandbox-only run may go without the stream.
     const why = e instanceof Error ? e.message : String(e);

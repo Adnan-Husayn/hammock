@@ -23,7 +23,7 @@ describe("markets config", () => {
       new PublicKey(m.mainnetMint);
       expect(loadGaps(gapsPath(m.gapsFile))).toHaveLength(104);
       expect(m.confCapBps.friday).toBeGreaterThan(0);
-      expect(m.confCapBps.monday).toBeLessThanOrEqual(200); // program bound MAX_CONF_CAP_BPS
+      expect(m.confCapBps.monday).toBeLessThanOrEqual(100); // program bound MAX_CONF_CAP_BPS
     }
     expect(new Set(MARKETS.map((m) => m.feedId)).size).toBe(MARKETS.length);
   });
@@ -101,16 +101,23 @@ class FakeSocket implements SocketLike {
 }
 
 describe("one subscription for every feed", () => {
-  it("subscribes to all feeds at once and emits one update per feed found in a frame", () => {
+  it("subscribes once per feed and reads each frame as its subscription's feed", () => {
     const socks: FakeSocket[] = [];
     const got: SignedUpdate[] = [];
     const stop = streamFeeds([1314, 1435, 1398, 922], (u) => got.push(u), {
       endpoints: ["a"], token: "t", makeSocket: () => { const s = new FakeSocket(); socks.push(s); return s; },
     });
     socks[0].h.open();
-    expect(JSON.parse(socks[0].sent[0]).priceFeedIds).toEqual([1314, 1435, 1398, 922]);
-    socks[0].h.message(JSON.stringify(fixture("regular-2026-10-29"))); // carries NVDA only
+    const subs = socks[0].sent.map((s) => JSON.parse(s));
+    expect(subs.map((s) => [s.subscriptionId, s.priceFeedIds])).toEqual([[1, [1314]], [2, [1435]], [3, [1398]], [4, [922]]]);
+    const nvdaFrame = fixture("regular-2026-10-29"); // subscriptionId 1, carries NVDA only
+    socks[0].h.message(JSON.stringify(nvdaFrame));
     expect(got.map((u) => u.feedId)).toEqual([1314]);
+    // The same bytes arriving on the TSLA subscription carry no TSLA feed and are dropped.
+    socks[0].h.message(JSON.stringify({ ...nvdaFrame, subscriptionId: 2 }));
+    expect(got).toHaveLength(1);
+    // Each emitted update is a single-feed message.
+    expect(Buffer.from(got[0].messageHex, "hex")[4 + 64 + 32 + 2 + 4 + 8 + 1]).toBe(1);
     stop();
     expect(parseStreamUpdates(fixture("regular-2026-10-29"), [1435])).toEqual([]);
   });
@@ -182,5 +189,54 @@ describe("sandbox and faucet per stock", () => {
     } finally {
       srv.close();
     }
+  });
+});
+
+describe("submit_report transaction size", () => {
+  it("a real Ed25519 + submit_report transaction with the fixture message fits in 1232 bytes", async () => {
+    const { submitReportInstructions } = await import("../src/chain.ts");
+    const msg = Buffer.from(fixture("regular-2026-10-29").solana.data, "hex");
+    expect(msg.length).toBe(158);
+    const payer = Keypair.generate();
+    const tx = new Transaction().add(...submitReportInstructions(pk(), payer.publicKey, pk(), "friday", msg));
+    tx.recentBlockhash = pk().toBase58();
+    tx.feePayer = payer.publicKey;
+    tx.sign(payer);
+    const size = tx.serialize().length;
+    expect(size).toBeLessThan(1232); // 591 bytes with one feed per message
+  });
+});
+
+/** A Solana-format envelope over a crafted payload (signature not valid; the decoder does not verify it). */
+function envelope(feeds: { id: number; props: [number, Buffer][] }[]): Buffer {
+  const u8 = (n: number) => Buffer.from([n]);
+  const u16 = (n: number) => { const b = Buffer.alloc(2); b.writeUInt16LE(n); return b; };
+  const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
+  const u64 = (n: bigint) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(n); return b; };
+  const payload = Buffer.concat([
+    u32(0x93c7d375), u64(TS), u8(1), u8(feeds.length),
+    ...feeds.flatMap((f) => [u32(f.id), u8(f.props.length), ...f.props.flatMap(([k, v]) => [u8(k), v])]),
+  ]);
+  return Buffer.concat([u32(0x821a01b9), Buffer.alloc(96), u16(payload.length), payload]);
+}
+const full = (price: bigint): [number, Buffer][] => {
+  const b8 = (v: bigint) => { const b = Buffer.alloc(8); b.writeBigInt64LE(v); return b; };
+  const b2 = (v: number) => { const b = Buffer.alloc(2); b.writeInt16LE(v); return b; };
+  return [[0, b8(price)], [3, b2(20)], [4, b2(-5)], [5, b8(1000n)], [9, b2(0)], [12, Buffer.concat([Buffer.from([1]), b8(TS)])]];
+};
+
+describe("multi-feed message decode", () => {
+  it("picks the requested feed out of several, and tolerates other feeds missing properties", async () => {
+    const { decodeSolanaMessage } = await import("../src/pyth.ts");
+    const m = envelope([{ id: 1314, props: full(18_000_000n) }, { id: 1435, props: full(40_000_000n) }, { id: 922, props: [] }]);
+    expect(decodeSolanaMessage(m, 1314).price).toBe(18_000_000n);
+    expect(decodeSolanaMessage(m, 1435).price).toBe(40_000_000n);
+    expect(() => decodeSolanaMessage(m, 922)).toThrow(/missing property/);
+    expect(() => decodeSolanaMessage(m, 1398)).toThrow(/feed not in message/);
+  });
+  it("rejects a duplicate target feed and an unknown property on another feed", async () => {
+    const { decodeSolanaMessage } = await import("../src/pyth.ts");
+    expect(() => decodeSolanaMessage(envelope([{ id: 1314, props: full(1n) }, { id: 1314, props: full(2n) }]), 1314)).toThrow(/duplicate feed/);
+    expect(() => decodeSolanaMessage(envelope([{ id: 1314, props: full(1n) }, { id: 1435, props: [[7, Buffer.alloc(2)]] }]), 1314)).toThrow(/unexpected property/);
   });
 });

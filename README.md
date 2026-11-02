@@ -48,7 +48,7 @@ kept by hand in `idl/gap_cover.json`; update it whenever an instruction changes.
 One program, one dealer service and one app cover several stocks. Each market names its Pyth Pro feed at creation:
 
 - `create_market` takes `feed_id` (non-zero) and `exponent` (must be -5, the exponent of every
-  `Equity.US.<SYM>/USD` feed) in `MarketParams`, next to the per-leg confidence caps (1..200 bps) and the
+  `Equity.US.<SYM>/USD` feed) in `MarketParams`, next to the per-leg confidence caps (1..100 bps) and the
   publisher minimum (1..64). Band (100/500 bps), bounty, windows and everything else are unchanged.
 - The market address is the PDA `["market", dealer, feed_id u32 LE, friday_target_ts i64 LE]`, so NVDA, TSLA, SPY
   and AAPL markets can share one weekend. A report for one feed is rejected (`WrongFeed`) on another feed's market.
@@ -66,8 +66,10 @@ because its Monday-mark p95 was 44 bps; the others keep 10/20 among the enabled 
 `data/marks.csv` after five weekdays. Caps are fixed per market at creation, so a change applies to markets created
 afterwards.
 
-The service streams every enabled feed on one Pyth subscription. One signed message carries all of them, and each
-feed in it becomes its own archive entry; the archive and keeper serve a market only its own feed. The freeze rule,
+The service streams every enabled feed plus every `REAL_MARKETS` market's feed (read from chain), one Pyth
+subscription per feed on each socket, so every signed message carries one feed and a submit_report transaction stays
+about 591 bytes however many stocks are enabled. It refuses to start when a real market's feed is not in `MARKETS`.
+The archive and keeper serve a market only its own feed. The freeze rule,
 the Jupiter reference and f_x are per stock. The app shows a stock picker and names the chosen stock throughout.
 
 ## Dealer service

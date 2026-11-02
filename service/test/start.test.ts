@@ -17,9 +17,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const idl = JSON.parse(readFileSync(join(ROOT, "idl", "gap_cover.json"), "utf8"));
 const pk = (n: number) => new PublicKey(Buffer.alloc(32, n));
 
-async function marketBytes(o: { state?: any; friday?: any } = {}) {
+async function marketBytes(o: { state?: any; friday?: any; feedId?: number } = {}) {
   return new BorshCoder(idl).accounts.encode("Market", {
-    dealer: pk(9), bump: 1, vault_bump: 2, feed_id: 1314, exponent: -5, stock_mint: pk(10), usdc_mint: pk(11), token_program: pk(12),
+    dealer: pk(9), bump: 1, vault_bump: 2, feed_id: o.feedId ?? 1314, exponent: -5, stock_mint: pk(10), usdc_mint: pk(11), token_program: pk(12),
     escrow: pk(13), collateral_reserve: pk(14), bounty_reserve: pk(15), friday_target_ts_us: new BN(TS.toString()), monday_target_ts_us: new BN((TS + 240_000_000_000n).toString()),
     buying_close_ts: new BN(0), band_lower_bps: 100, band_upper_bps: 500, friday_conf_cap_bps: 10, monday_conf_cap_bps: 20, min_publishers: 10,
     eligibility_half_window_us: new BN(5_000_000), submission_window_us: new BN(420_000_000), max_contracts: 200, bounty_per_leg: new BN(0),
@@ -66,6 +66,28 @@ async function start(c: ReturnType<typeof setup>, updates: SignedUpdate[]) {
   if (!server.listening) await new Promise((r) => server.once("listening", r));
   return `http://127.0.0.1:${(server.address() as any).port}`;
 }
+
+describe("stream feeds through startService", () => {
+  const boot = async (feedId: number, env: NodeJS.ProcessEnv) => {
+    const c = setup();
+    const data = await marketBytes({ feedId });
+    const conn = { getAccountInfo: async (k: PublicKey) => (k.equals(c.market) ? { owner: c.programId, data } : null), getBalance: async () => 0 } as any;
+    let feeds: number[] = [];
+    const p = startService({ ...c.env, ...env }, { conn, reference: async () => null, stream: (_f, _o, ids) => { feeds = ids; return () => {}; } });
+    return { p, feeds: () => feeds };
+  };
+
+  it("streams a real market's feed even when its stock is not enabled", async () => {
+    const r = await boot(1435, { ENABLED_SYMBOLS: "NVDA" });
+    servers.push(await r.p);
+    expect(r.feeds()).toEqual([1314, 1435]);
+  });
+
+  it("refuses to start when a real market's feed has no config entry", async () => {
+    const r = await boot(4242, {});
+    await expect(r.p).rejects.toThrow(/feed 4242/);
+  });
+});
 
 describe("GET /archive through startService", () => {
   it("serves the stream's eligible reports for a market, and survives a restart", async () => {
