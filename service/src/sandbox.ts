@@ -124,13 +124,73 @@ async function send(conn: Connection, payer: Keypair, ixs: TransactionInstructio
   return sig;
 }
 
-/** Borsh MarketParams for a sandbox market (programs/gap_cover/src/instructions/create_market.rs). */
-export function encodeSandboxParams(now: bigint, mode: SandboxMode, quoteKey: PublicKey, demo: PublicKey): Buffer {
+export type MarketParams = {
+  fridayTargetTs: bigint; // unix seconds, UTC
+  mondayTargetTs: bigint;
+  buyingCloseTs: bigint;
+  fridayConfCapBps: number;
+  mondayConfCapBps: number;
+  minPublishers: number;
+  maxContracts: number;
+  quoteKey: PublicKey;
+  sandbox: boolean;
+  demoAuthority: PublicKey; // PublicKey.default on real markets
+  mode: SandboxMode;
+};
+
+/** Band and bounty are fixed by the program for every market (spec section 6). */
+export const BAND_LOWER_BPS = 100;
+export const BAND_UPPER_BPS = 500;
+export const BOUNTY_PER_LEG = 100_000n;
+
+/** Borsh MarketParams (programs/gap_cover/src/instructions/create_market.rs). */
+export function encodeMarketParams(p: MarketParams): Buffer {
   return Buffer.concat([
-    i64(now), i64(now + 601n), i64(now + 600n), // friday, monday, buying close (the program also caps sandbox buying at 600 s)
-    u16(100), u16(500), u16(10), u16(20), u16(10), u32(SANDBOX_MAX_CONTRACTS), i64(100_000n),
-    quoteKey.toBuffer(), Buffer.from([1]), demo.toBuffer(), Buffer.from([mode === "gap" ? 0 : 1]),
+    i64(p.fridayTargetTs), i64(p.mondayTargetTs), i64(p.buyingCloseTs),
+    u16(BAND_LOWER_BPS), u16(BAND_UPPER_BPS), u16(p.fridayConfCapBps), u16(p.mondayConfCapBps), u16(p.minPublishers),
+    u32(p.maxContracts), i64(BOUNTY_PER_LEG),
+    p.quoteKey.toBuffer(), Buffer.from([p.sandbox ? 1 : 0]), p.demoAuthority.toBuffer(), Buffer.from([p.mode === "gap" ? 0 : 1]),
   ]);
+}
+
+/** Borsh MarketParams for a sandbox market. */
+export function encodeSandboxParams(now: bigint, mode: SandboxMode, quoteKey: PublicKey, demo: PublicKey): Buffer {
+  return encodeMarketParams({
+    fridayTargetTs: now, mondayTargetTs: now + 601n, buyingCloseTs: now + 600n, // the program also caps sandbox buying at 600 s
+    fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10, maxContracts: SANDBOX_MAX_CONTRACTS,
+    quoteKey, sandbox: true, demoAuthority: demo, mode,
+  });
+}
+
+/** Market PDA: seeds [market, dealer, friday_target_ts]. */
+export function marketAddress(programId: PublicKey, dealer: PublicKey, fridayTargetTs: bigint): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("market"), dealer.toBuffer(), i64(fridayTargetTs)], programId)[0];
+}
+
+/** create_market. The dealer pays rent and funds both reserves from its USDC account. */
+export function createMarketInstruction(
+  programId: PublicKey, dealer: PublicKey, usdcMint: PublicKey, nvdaxMint: PublicKey, fridayTargetTs: bigint, params: Buffer,
+): { market: PublicKey; ix: TransactionInstruction } {
+  const market = marketAddress(programId, dealer, fridayTargetTs);
+  const pda = (seed: string) => PublicKey.findProgramAddressSync([Buffer.from(seed), market.toBuffer()], programId)[0];
+  const ix = {
+    programId,
+    keys: [
+      { pubkey: dealer, isSigner: true, isWritable: true },
+      { pubkey: market, isSigner: false, isWritable: true },
+      { pubkey: pda("vault"), isSigner: false, isWritable: false },
+      { pubkey: usdcMint, isSigner: false, isWritable: false },
+      { pubkey: nvdaxMint, isSigner: false, isWritable: false },
+      { pubkey: pda("escrow"), isSigner: false, isWritable: true },
+      { pubkey: pda("collateral"), isSigner: false, isWritable: true },
+      { pubkey: pda("bounty"), isSigner: false, isWritable: true },
+      { pubkey: getAssociatedTokenAddressSync(usdcMint, dealer), isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.concat([Buffer.from(IX.create_market), params]),
+  } as TransactionInstruction;
+  return { market, ix };
 }
 
 export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
@@ -154,7 +214,7 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
       // Seeds [market, dealer, friday_target_ts]: one sandbox per second; retry the next second on a clash.
       for (let attempt = 0; attempt < 5; attempt++) {
         const now = BigInt(Math.floor(Date.now() / 1000)) + BigInt(attempt);
-        const market = PublicKey.findProgramAddressSync([Buffer.from("market"), s.dealer.publicKey.toBuffer(), i64(now)], s.programId)[0];
+        const market = marketAddress(s.programId, s.dealer.publicKey, now);
         if (await s.conn.getAccountInfo(market)) continue;
         const params = encodeSandboxParams(now, mode, s.quoteKey, s.demo.publicKey);
         let nvdax = s.nvdaxMint;
@@ -169,23 +229,7 @@ export function devnetSandboxChain(s: DevnetSetup): SandboxChain {
           ], [own]);
           nvdax = own.publicKey;
         }
-        const create: TransactionInstruction = {
-          programId: s.programId,
-          keys: [
-            { pubkey: s.dealer.publicKey, isSigner: true, isWritable: true },
-            { pubkey: market, isSigner: false, isWritable: true },
-            { pubkey: pda("vault", market), isSigner: false, isWritable: false },
-            { pubkey: s.usdcMint, isSigner: false, isWritable: false },
-            { pubkey: nvdax, isSigner: false, isWritable: false },
-            { pubkey: pda("escrow", market), isSigner: false, isWritable: true },
-            { pubkey: pda("collateral", market), isSigner: false, isWritable: true },
-            { pubkey: pda("bounty", market), isSigner: false, isWritable: true },
-            { pubkey: dealerUsdc, isSigner: false, isWritable: true },
-            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-          ],
-          data: Buffer.concat([Buffer.from(IX.create_market), params]),
-        } as TransactionInstruction;
+        const { ix: create } = createMarketInstruction(s.programId, s.dealer.publicKey, s.usdcMint, nvdax, now, params);
         await send(s.conn, s.dealer, [create, sandboxPrice(market, 0, fridayPrice) as TransactionInstruction], [s.demo]);
         return market;
       }

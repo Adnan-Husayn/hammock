@@ -68,7 +68,16 @@ file.
 
 Before Friday (at least an hour before the Friday target, once the market exists):
 
-1. Create the market with `scripts/create-real-market.ts` and note the address it prints.
+1. Create the market and note the address it prints. Run the dry run first; it reads the mint and prints the
+   parameters without sending:
+
+        DEALER_KEYPAIR=<dealer key> node scripts/create-real-market.ts 2026-11-06 --dry-run
+        DEALER_KEYPAIR=<dealer key> node scripts/create-real-market.ts 2026-11-06
+
+   It refuses holiday weeks, a Friday target less than an hour away, and a multiplier change scheduled on the NVDAx
+   mint before the Monday target. Early-close Fridays get the 12:59:30 ET target. Buying closes Sunday 17:50 ET
+   (spec section 4). Default `--max-contracts` is 5000, so the dealer needs 5000.20 demo USDC for the reserves.
+   Set `QUOTE_PUBKEY` if the service signs quotes with `QUOTE_KEYPAIR`; it defaults to the dealer key.
 2. From the repository root:
 
         fly deploy -c service/fly.real.toml -e REAL_MARKETS=<market address>
