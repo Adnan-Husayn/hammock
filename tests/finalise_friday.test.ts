@@ -24,6 +24,7 @@ type Ctx = Awaited<ReturnType<typeof setup>>;
 
 const pda = (h: Harness, seeds: Buffer[]) => PublicKey.findProgramAddressSync(seeds, h.program.programId)[0];
 function i64le(v: number) { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); return b; }
+function u32le(v: number) { const b = Buffer.alloc(4); b.writeUInt32LE(v); return b; }
 const logs = (r: SendResult) => (failed(r) ? `${r.toString()}\n${r.meta().logs().join("\n")}` : r.logs().join("\n"));
 function expectError(r: SendResult, name: string) {
   expect(failed(r), "expected the transaction to fail").toBe(true);
@@ -31,7 +32,7 @@ function expectError(r: SendResult, name: string) {
 }
 
 async function createMarketAt(c: Ctx) {
-  const market = pda(c.h, [Buffer.from("market"), c.h.payer.publicKey.toBuffer(), i64le(FRIDAY)]);
+  const market = pda(c.h, [Buffer.from("market"), c.h.payer.publicKey.toBuffer(), u32le(1314), i64le(FRIDAY)]);
   const a = {
     market,
     vaultAuthority: pda(c.h, [Buffer.from("vault"), market.toBuffer()]),
@@ -40,6 +41,7 @@ async function createMarketAt(c: Ctx) {
     bountyReserve: pda(c.h, [Buffer.from("bounty"), market.toBuffer()]),
   };
   const params = {
+    feedId: 1314, exponent: -5,
     fridayTargetTs: new BN(FRIDAY), mondayTargetTs: new BN(MONDAY), buyingCloseTs: new BN(MONDAY - 3600),
     bandLowerBps: 100, bandUpperBps: 500, fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10,
     maxContracts: 50, bountyPerLeg: new BN(100_000), dealerQuoteKey: Keypair.generate().publicKey,
@@ -47,7 +49,7 @@ async function createMarketAt(c: Ctx) {
   };
   await warpTo(c.h.context, FRIDAY - 7200);
   const ix = await c.h.program.methods.createMarket(params).accounts({
-    dealer: c.h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: c.usdc, nvdaxMint: c.nvdax,
+    dealer: c.h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: c.usdc, stockMint: c.nvdax,
     escrow: a.escrow, collateralReserve: a.collateralReserve, bountyReserve: a.bountyReserve,
     dealerUsdc: c.dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   }).instruction();
@@ -69,7 +71,7 @@ async function report(c: Ctx, market: PublicKey, who: Keypair) {
 
 async function finaliseIx(c: Ctx, a: Awaited<ReturnType<typeof createMarketAt>>, caller: PublicKey, submitterUsdc: PublicKey, dealerUsdc = c.dealerUsdc) {
   return c.h.program.methods.finaliseFriday().accounts({
-    caller, market: a.market, vaultAuthority: a.vaultAuthority, usdcMint: c.usdc, nvdaxMint: c.nvdax,
+    caller, market: a.market, vaultAuthority: a.vaultAuthority, usdcMint: c.usdc, stockMint: c.nvdax,
     escrow: a.escrow, collateralReserve: a.collateralReserve, bountyReserve: a.bountyReserve,
     submitterUsdc, dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID,
   }).instruction();

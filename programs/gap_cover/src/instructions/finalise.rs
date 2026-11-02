@@ -17,8 +17,8 @@ pub struct Finalise<'info> {
     #[account(address = market.usdc_mint @ GapError::InvalidMint)]
     pub usdc_mint: UncheckedAccount<'info>,
     /// CHECK: key checked against the market; parsed for the ScaledUiAmount extension.
-    #[account(address = market.nvdax_mint @ GapError::InvalidMint)]
-    pub nvdax_mint: UncheckedAccount<'info>,
+    #[account(address = market.stock_mint @ GapError::InvalidMint)]
+    pub stock_mint: UncheckedAccount<'info>,
     /// CHECK: key checked against the market.
     #[account(mut, address = market.escrow @ GapError::InvalidMint)]
     pub escrow: UncheckedAccount<'info>,
@@ -79,7 +79,7 @@ pub fn finalise_friday(ctx: Context<Finalise>) -> Result<()> {
         .ok_or(GapError::Overflow)?;
     require!(now_us > close, GapError::WindowOpen);
 
-    let void = market.friday.is_none() || multiplier_voids(&ctx.accounts.nvdax_mint.to_account_info(), market, now)?;
+    let void = market.friday.is_none() || multiplier_voids(&ctx.accounts.stock_mint.to_account_info(), market, now)?;
 
     let market_key = market.key();
     let bump = [market.vault_bump];
@@ -152,7 +152,7 @@ pub fn finalise_monday(ctx: Context<Finalise>) -> Result<()> {
 
     let friday = market.friday.ok_or(GapError::WrongState)?;
     let monday = market.monday;
-    let void = monday.is_none() || multiplier_voids(&ctx.accounts.nvdax_mint.to_account_info(), market, now)?;
+    let void = monday.is_none() || multiplier_voids(&ctx.accounts.stock_mint.to_account_info(), market, now)?;
 
     let dealer = market.dealer;
     require_usdc_account(&ctx.accounts.dealer_usdc, market, &dealer)?;

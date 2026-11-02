@@ -32,7 +32,7 @@ async function setup(sandbox = true) {
   const quoteKey = Keypair.generate();
   const demo = Keypair.generate();
   h.context.airdrop(demo.publicKey, 1_000_000_000n);
-  const market = pda(h, [Buffer.from("market"), h.payer.publicKey.toBuffer(), i64le(FRIDAY)]);
+  const market = pda(h, [Buffer.from("market"), h.payer.publicKey.toBuffer(), u32le(1314), i64le(FRIDAY)]);
   const a = {
     market,
     vaultAuthority: pda(h, [Buffer.from("vault"), market.toBuffer()]),
@@ -41,6 +41,7 @@ async function setup(sandbox = true) {
     bountyReserve: pda(h, [Buffer.from("bounty"), market.toBuffer()]),
   };
   const params = {
+    feedId: 1314, exponent: -5,
     fridayTargetTs: new BN(FRIDAY), mondayTargetTs: new BN(MONDAY), buyingCloseTs: new BN(MONDAY - 3600),
     bandLowerBps: 100, bandUpperBps: 500, fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10,
     maxContracts: 50, bountyPerLeg: new BN(100_000), dealerQuoteKey: quoteKey.publicKey,
@@ -48,7 +49,7 @@ async function setup(sandbox = true) {
   };
   await warpTo(h.context, FRIDAY - 7200);
   const ix = await h.program.methods.createMarket(params).accounts({
-    dealer: h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: usdc, nvdaxMint: nvdax,
+    dealer: h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: usdc, stockMint: nvdax,
     escrow: a.escrow, collateralReserve: a.collateralReserve, bountyReserve: a.bountyReserve,
     dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   }).instruction();
@@ -89,7 +90,7 @@ async function buy(c: Ctx, contracts: number, premium: bigint) {
 
 async function finaliseIx(c: Ctx, caller: PublicKey, submitterUsdc: PublicKey, dealerUsdc = c.dealerUsdc) {
   return c.h.program.methods.finaliseMonday().accounts({
-    caller, market: c.a.market, vaultAuthority: c.a.vaultAuthority, usdcMint: c.usdc, nvdaxMint: c.nvdax,
+    caller, market: c.a.market, vaultAuthority: c.a.vaultAuthority, usdcMint: c.usdc, stockMint: c.nvdax,
     escrow: c.a.escrow, collateralReserve: c.a.collateralReserve, bountyReserve: c.a.bountyReserve,
     submitterUsdc, dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID,
   }).instruction();

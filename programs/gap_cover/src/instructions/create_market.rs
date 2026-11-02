@@ -7,6 +7,10 @@ use crate::token::{create_pda_token_account, is_token_program, mint_decimals, sc
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct MarketParams {
+    /// Pyth Pro feed id of the underlying, e.g. 1314 for Equity.US.NVDA/USD.
+    pub feed_id: u32,
+    /// Price exponent of that feed; must be REQUIRED_EXPONENT.
+    pub exponent: i16,
     /// Unix seconds, UTC.
     pub friday_target_ts: i64,
     pub monday_target_ts: i64,
@@ -33,7 +37,12 @@ pub struct CreateMarket<'info> {
         init,
         payer = dealer,
         space = 8 + Market::INIT_SPACE,
-        seeds = [b"market", dealer.key().as_ref(), &params.friday_target_ts.to_le_bytes()],
+        seeds = [
+            b"market",
+            dealer.key().as_ref(),
+            &params.feed_id.to_le_bytes(),
+            &params.friday_target_ts.to_le_bytes()
+        ],
         bump
     )]
     pub market: Account<'info, Market>,
@@ -43,7 +52,7 @@ pub struct CreateMarket<'info> {
     /// CHECK: owner must be the token program; decimals checked below.
     pub usdc_mint: UncheckedAccount<'info>,
     /// CHECK: Token-2022 mint with the ScaledUiAmount extension, parsed below.
-    pub nvdax_mint: UncheckedAccount<'info>,
+    pub stock_mint: UncheckedAccount<'info>,
     /// CHECK: created here as a token account at this PDA.
     #[account(mut, seeds = [b"escrow", market.key().as_ref()], bump)]
     pub escrow: UncheckedAccount<'info>,
@@ -70,8 +79,13 @@ fn validate(p: &MarketParams, now: i64) -> Result<()> {
     require!(p.bounty_per_leg == BOUNTY_PER_LEG, GapError::InvalidParams);
     require!(p.friday_target_ts < p.buying_close_ts, GapError::InvalidParams);
     require!(p.buying_close_ts <= p.monday_target_ts, GapError::InvalidParams);
-    require!(p.friday_conf_cap_bps > 0 && p.monday_conf_cap_bps > 0, GapError::InvalidParams);
-    require!(p.min_publishers > 0 && p.max_contracts > 0, GapError::InvalidParams);
+    require!(p.feed_id != 0, GapError::InvalidParams);
+    require!(p.exponent == REQUIRED_EXPONENT, GapError::InvalidParams);
+    for cap in [p.friday_conf_cap_bps, p.monday_conf_cap_bps] {
+        require!(cap > 0 && cap <= MAX_CONF_CAP_BPS, GapError::InvalidParams);
+    }
+    require!(p.min_publishers > 0 && p.min_publishers <= MAX_MIN_PUBLISHERS, GapError::InvalidParams);
+    require!(p.max_contracts > 0, GapError::InvalidParams);
     require!(p.dealer_quote_key != Pubkey::default(), GapError::InvalidParams);
     // Both targets must convert to microseconds without overflow.
     p.monday_target_ts.checked_mul(1_000_000).ok_or(GapError::InvalidParams)?;
@@ -94,7 +108,7 @@ pub fn create_market(ctx: Context<CreateMarket>, params: MarketParams) -> Result
     require!(is_token_program(tp.key), GapError::InvalidMint);
     require_keys_eq!(*ctx.accounts.usdc_mint.owner, *tp.key, GapError::InvalidMint);
     require!(mint_decimals(&ctx.accounts.usdc_mint)? == 6, GapError::InvalidMint);
-    let (mult, ts, new_mult) = scaled_ui_config(&ctx.accounts.nvdax_mint)?;
+    let (mult, ts, new_mult) = scaled_ui_config(&ctx.accounts.stock_mint)?;
 
     let collateral = (params.max_contracts as u64)
         .checked_mul(CONTRACT_UNIT)
@@ -136,9 +150,9 @@ pub fn create_market(ctx: Context<CreateMarket>, params: MarketParams) -> Result
         dealer: ctx.accounts.dealer.key(),
         bump: ctx.bumps.market,
         vault_bump: ctx.bumps.vault_authority,
-        feed_id: FEED_ID,
-        exponent: EXPONENT,
-        nvdax_mint: ctx.accounts.nvdax_mint.key(),
+        feed_id: params.feed_id,
+        exponent: params.exponent,
+        stock_mint: ctx.accounts.stock_mint.key(),
         usdc_mint: ctx.accounts.usdc_mint.key(),
         token_program: tp.key(),
         escrow: ctx.accounts.escrow.key(),
@@ -167,4 +181,57 @@ pub fn create_market(ctx: Context<CreateMarket>, params: MarketParams) -> Result
         ..Default::default()
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params() -> MarketParams {
+        MarketParams {
+            feed_id: 1314,
+            exponent: -5,
+            friday_target_ts: 10_000,
+            monday_target_ts: 20_000,
+            buying_close_ts: 15_000,
+            band_lower_bps: BAND_LOWER_BPS,
+            band_upper_bps: BAND_UPPER_BPS,
+            friday_conf_cap_bps: 10,
+            monday_conf_cap_bps: 20,
+            min_publishers: 10,
+            max_contracts: 200,
+            bounty_per_leg: BOUNTY_PER_LEG,
+            dealer_quote_key: Pubkey::new_unique(),
+            sandbox: false,
+            demo_authority: Pubkey::default(),
+            sandbox_mode: SandboxMode::Gap,
+        }
+    }
+    fn ok(p: MarketParams) -> bool {
+        validate(&p, 0).is_ok()
+    }
+
+    #[test]
+    fn accepts_each_enabled_feed() {
+        for feed_id in [1314, 1435, 1398, 922, 1163, 1292, 1272, 1363, 954] {
+            assert!(ok(MarketParams { feed_id, ..params() }));
+        }
+    }
+    #[test]
+    fn rejects_zero_feed_and_other_exponents() {
+        assert!(!ok(MarketParams { feed_id: 0, ..params() }));
+        assert!(!ok(MarketParams { exponent: -6, ..params() }));
+        assert!(!ok(MarketParams { exponent: -8, ..params() }));
+        assert!(!ok(MarketParams { exponent: 0, ..params() }));
+    }
+    #[test]
+    fn cap_and_publisher_bounds() {
+        assert!(ok(MarketParams { friday_conf_cap_bps: MAX_CONF_CAP_BPS, monday_conf_cap_bps: 67, ..params() }));
+        assert!(!ok(MarketParams { friday_conf_cap_bps: MAX_CONF_CAP_BPS + 1, ..params() }));
+        assert!(!ok(MarketParams { monday_conf_cap_bps: MAX_CONF_CAP_BPS + 1, ..params() }));
+        assert!(!ok(MarketParams { monday_conf_cap_bps: 0, ..params() }));
+        assert!(ok(MarketParams { min_publishers: MAX_MIN_PUBLISHERS, ..params() }));
+        assert!(!ok(MarketParams { min_publishers: MAX_MIN_PUBLISHERS + 1, ..params() }));
+        assert!(!ok(MarketParams { min_publishers: 0, ..params() }));
+    }
 }

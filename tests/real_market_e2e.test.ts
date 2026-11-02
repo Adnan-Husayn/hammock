@@ -15,7 +15,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   startHarness, warpTo, fixturePayload, createScaledMint, createUsdcMint, mintUsdc, tokenBalance, sendTx, failed, SendResult,
 } from "./harness";
-import { createMarketInstruction, encodeMarketParams, type MarketParams } from "../service/src/sandbox";
+import { createMarketInstruction, type MarketParams } from "../service/src/sandbox";
 import { finaliseInstruction, submitReportInstructions } from "../service/src/chain";
 import { decodeMarket, positionPda, signQuote } from "../service/src/quote";
 
@@ -34,11 +34,12 @@ async function setup(targets: { friday: number; monday: number; close: number },
   const quoteKey = Keypair.generate();
   const programId = h.program.programId;
   const p: MarketParams = {
+    feedId: 1314,
     fridayTargetTs: BigInt(targets.friday), mondayTargetTs: BigInt(targets.monday), buyingCloseTs: BigInt(targets.close),
     fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10, maxContracts,
     quoteKey: quoteKey.publicKey, sandbox: false, demoAuthority: PublicKey.default, mode: "gap",
   };
-  const { market, ix: create } = createMarketInstruction(programId, h.payer.publicKey, usdc, nvdax, p.fridayTargetTs, encodeMarketParams(p));
+  const { market, ix: create } = createMarketInstruction(programId, h.payer.publicKey, usdc, nvdax, p);
   const createIx = ix(create);
   createIx.keys[8].pubkey = dealerUsdc; // the harness funds a plain token account, not the dealer's ATA
   await warpTo(h.context, targets.friday - 7200);

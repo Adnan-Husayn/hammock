@@ -46,8 +46,14 @@ function i64le(v: number) {
   return b;
 }
 
-function addresses(c: Ctx, fridayTs: number) {
-  const market = pda(c.h, [Buffer.from("market"), c.h.payer.publicKey.toBuffer(), i64le(fridayTs)]);
+function u32le(v: number) {
+  const b = Buffer.alloc(4);
+  b.writeUInt32LE(v);
+  return b;
+}
+
+function addresses(c: Ctx, fridayTs: number, feedId = 1314) {
+  const market = pda(c.h, [Buffer.from("market"), c.h.payer.publicKey.toBuffer(), u32le(feedId), i64le(fridayTs)]);
   return {
     market,
     vaultAuthority: pda(c.h, [Buffer.from("vault"), market.toBuffer()]),
@@ -59,6 +65,8 @@ function addresses(c: Ctx, fridayTs: number) {
 
 function params(over: Record<string, unknown> = {}) {
   return {
+    feedId: 1314,
+    exponent: -5,
     fridayTargetTs: new BN(FRIDAY),
     mondayTargetTs: new BN(MONDAY),
     buyingCloseTs: new BN(MONDAY - 3600),
@@ -78,7 +86,7 @@ function params(over: Record<string, unknown> = {}) {
 }
 
 async function createIx(c: Ctx, p: ReturnType<typeof params>) {
-  const a = addresses(c, (p.fridayTargetTs as BN).toNumber());
+  const a = addresses(c, (p.fridayTargetTs as BN).toNumber(), p.feedId as number);
   const ix = await c.h.program.methods
     .createMarket(p)
     .accounts({
@@ -86,7 +94,7 @@ async function createIx(c: Ctx, p: ReturnType<typeof params>) {
       market: a.market,
       vaultAuthority: a.vaultAuthority,
       usdcMint: c.usdc,
-      nvdaxMint: c.nvdax,
+      stockMint: c.nvdax,
       escrow: a.escrow,
       collateralReserve: a.collateralReserve,
       bountyReserve: a.bountyReserve,
@@ -145,7 +153,7 @@ async function realFridayFinal(c: Ctx, market: PublicKey) {
   const a = addresses(c, friday);
   const subUsdc = await mintUsdc(c.h.context, c.usdc, submitter.publicKey, 0n);
   const fin = await c.h.program.methods.finaliseFriday().accounts({
-    caller: c.h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: c.usdc, nvdaxMint: c.nvdax,
+    caller: c.h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: c.usdc, stockMint: c.nvdax,
     escrow: a.escrow, collateralReserve: a.collateralReserve, bountyReserve: a.bountyReserve,
     submitterUsdc: subUsdc, dealerUsdc: c.dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID,
   }).instruction();
@@ -222,6 +230,29 @@ describe("create_market", () => {
     expectError((await createMarket(c, { bandLowerBps: 100, bandUpperBps: 100 })).r, "InvalidParams");
     expectError((await createMarket(c, { bandLowerBps: 0, bandUpperBps: 500 })).r, "InvalidParams");
     expectError((await createMarket(c, { bandLowerBps: 100, bandUpperBps: 10_001 })).r, "InvalidParams");
+  });
+
+  it("creates NVDA and TSLA markets on the same weekend at different addresses", async () => {
+    const c = await setup();
+    const nvda = await mustCreate(c, { feedId: 1314 });
+    const tsla = await mustCreate(c, { feedId: 1435, mondayConfCapBps: 67 });
+    expect(nvda.market.equals(tsla.market)).toBe(false);
+    expect(nvda.escrow.equals(tsla.escrow)).toBe(false);
+    const m1 = await fetchMarket(c, nvda.market);
+    const m2 = await fetchMarket(c, tsla.market);
+    expect(m1.feedId).toBe(1314);
+    expect(m2.feedId).toBe(1435);
+    expect(m2.mondayConfCapBps).toBe(67);
+    expect(m1.fridayTargetTsUs.toString()).toBe(m2.fridayTargetTsUs.toString());
+  });
+
+  it("rejects a zero feed id, a non -5 exponent, and caps or publisher minimums out of bounds", async () => {
+    const c = await setup();
+    expectError((await createMarket(c, { feedId: 0 })).r, "InvalidParams");
+    expectError((await createMarket(c, { exponent: -6 })).r, "InvalidParams");
+    expectError((await createMarket(c, { fridayConfCapBps: 201 })).r, "InvalidParams");
+    expectError((await createMarket(c, { mondayConfCapBps: 0 })).r, "InvalidParams");
+    expectError((await createMarket(c, { minPublishers: 65 })).r, "InvalidParams");
   });
 
   it("rejects a real market that names a demo authority", async () => {
@@ -311,6 +342,20 @@ describe("submit_report", () => {
     const a = await mustCreate(c);
     const ix = await sandboxPriceIx(c, a.market, c.h.payer.publicKey, "friday", 21_000_000);
     expectError(sendTx(c.h.context, c.h.payer, [ix]), "NotSandbox");
+  });
+});
+
+describe("two markets on one weekend", () => {
+  it("an NVDA report sets the NVDA market's candidate and is rejected on the TSLA market", async () => {
+    const c = await setup();
+    const nvda = await mustCreate(c, { ...OVERLAP, feedId: 1314 });
+    const tsla = await mustCreate(c, { ...OVERLAP, feedId: 1435 });
+    await warpTo(c.h.context, MONDAY - 7);
+    expectError(await submit(c, tsla.market, "friday", Keypair.generate()), "WrongFeed");
+    expect((await fetchMarket(c, tsla.market)).friday).toBeNull();
+    const ok = await submit(c, nvda.market, "friday", Keypair.generate());
+    expect(failed(ok), logs(ok)).toBe(false);
+    expect((await fetchMarket(c, nvda.market)).friday).not.toBeNull();
   });
 });
 

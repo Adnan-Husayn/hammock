@@ -19,6 +19,7 @@ const MONDAY = FRIDAY + 66 * 3600;
 const AFTER = FRIDAY + 7 * 60 + 1;
 const logs = (r: any) => (failed(r) ? `${r.toString()}\n${r.meta().logs().join("\n")}` : "");
 function i64le(v: number) { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); return b; }
+function u32le(v: number) { const b = Buffer.alloc(4); b.writeUInt32LE(v); return b; }
 
 async function setup(withReport = true) {
   const h = await startHarness();
@@ -26,15 +27,16 @@ async function setup(withReport = true) {
   const nvdax = await createScaledMint(h.context, { decimals: 8, multiplier: 1.0 });
   const dealerUsdc = await mintUsdc(h.context, usdc, h.payer.publicKey, 1_000_000_000n);
   const pda = (seeds: Buffer[]) => PublicKey.findProgramAddressSync(seeds, h.program.programId)[0];
-  const market = pda([Buffer.from("market"), h.payer.publicKey.toBuffer(), i64le(FRIDAY)]);
+  const market = pda([Buffer.from("market"), h.payer.publicKey.toBuffer(), u32le(1314), i64le(FRIDAY)]);
   await warpTo(h.context, FRIDAY - 7200);
   const ix = await h.program.methods.createMarket({
+    feedId: 1314, exponent: -5,
     fridayTargetTs: new BN(FRIDAY), mondayTargetTs: new BN(MONDAY), buyingCloseTs: new BN(MONDAY - 3600),
     bandLowerBps: 100, bandUpperBps: 500, fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10,
     maxContracts: 50, bountyPerLeg: new BN(100_000), dealerQuoteKey: Keypair.generate().publicKey,
     sandbox: false, demoAuthority: PublicKey.default, sandboxMode: { gap: {} },
   } as any).accounts({
-    dealer: h.payer.publicKey, market, vaultAuthority: pda([Buffer.from("vault"), market.toBuffer()]), usdcMint: usdc, nvdaxMint: nvdax,
+    dealer: h.payer.publicKey, market, vaultAuthority: pda([Buffer.from("vault"), market.toBuffer()]), usdcMint: usdc, stockMint: nvdax,
     escrow: pda([Buffer.from("escrow"), market.toBuffer()]), collateralReserve: pda([Buffer.from("collateral"), market.toBuffer()]),
     bountyReserve: pda([Buffer.from("bounty"), market.toBuffer()]), dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   } as any).instruction();

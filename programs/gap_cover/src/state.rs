@@ -7,9 +7,13 @@ pub enum Leg {
     Monday,
 }
 
+/// Every Pyth Pro US equity feed (Equity.US.<SYM>/USD) uses this exponent. The feed id and exponent are
+/// create-time market parameters; this release accepts only this exponent.
+pub const REQUIRED_EXPONENT: i16 = -5;
+/// Bounds on the per-leg confidence caps and the publisher minimum set at creation.
+pub const MAX_CONF_CAP_BPS: u16 = 200;
+pub const MAX_MIN_PUBLISHERS: u16 = 64;
 /// Fixed by spec section 6 for every market.
-pub const FEED_ID: u32 = 1314;
-pub const EXPONENT: i16 = -5;
 pub const ELIGIBILITY_HALF_WINDOW_US: i64 = 5_000_000;
 pub const SUBMISSION_WINDOW_US: i64 = 7 * 60 * 1_000_000;
 pub const SANDBOX_SUBMISSION_WINDOW_US: i64 = 5_000_000;
@@ -56,7 +60,7 @@ pub struct Market {
     pub vault_bump: u8,
     pub feed_id: u32,
     pub exponent: i16,
-    pub nvdax_mint: Pubkey,
+    pub stock_mint: Pubkey,
     pub usdc_mint: Pubkey,
     pub token_program: Pubkey,
     pub escrow: Pubkey,

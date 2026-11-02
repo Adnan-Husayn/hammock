@@ -296,6 +296,15 @@ mod tests {
         expect(&r, &market(), Leg::Friday, PythError::WrongFeed);
     }
     #[test]
+    fn nvda_report_rejected_on_tsla_market() {
+        // Same weekend, different feed: an NVDA (1314) report cannot settle a TSLA (1435) market.
+        let mut m = market();
+        m.feed_id = 1435;
+        expect(&report(), &m, Leg::Friday, PythError::WrongFeed);
+        // The parser also refuses to return a feed the message does not carry.
+        assert!(parse_report(&regular(), 1435).is_err());
+    }
+    #[test]
     fn wrong_session() {
         let r = parse_report(&premarket(), 1314).unwrap();
         let mut m = market();

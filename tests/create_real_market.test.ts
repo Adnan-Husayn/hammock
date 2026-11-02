@@ -5,7 +5,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   CREATE_LEAD_S, DEFAULT_MAX_CONTRACTS, Refusal, buildRealMarketParams, buyingClose, checkMultiplier, describeParams, reserveUsdc,
 } from "../scripts/create-real-market";
-import { createMarketInstruction, encodeMarketParams } from "../service/src/sandbox";
+import { createMarketInstruction, marketAddress } from "../service/src/sandbox";
 
 const quoteKey = Keypair.generate().publicKey;
 const flat = { multiplier: 1, newMultiplier: 1, newMultiplierEffectiveTs: 0n };
@@ -58,15 +58,27 @@ describe("create-real-market params", () => {
     expect(buyingClose(new Date("2026-10-26T13:31:30Z")).toISOString()).toBe("2026-10-25T21:50:00.000Z"); // EDT
   });
 
+  it("takes the symbol's feed id and caps, and a different address per stock on the same weekend", () => {
+    const nvda = buildRealMarketParams({ dateEt: "2026-11-06", nowS: NOW, quoteKey, multiplier: flat });
+    const tsla = buildRealMarketParams({ symbol: "TSLA", dateEt: "2026-11-06", nowS: NOW, quoteKey, multiplier: flat });
+    expect(nvda.feedId).toBe(1314);
+    expect(tsla).toMatchObject({ feedId: 1435, fridayConfCapBps: 16, mondayConfCapBps: 67, fridayTargetTs: nvda.fridayTargetTs });
+    const programId = Keypair.generate().publicKey, dealer = Keypair.generate().publicKey;
+    expect(marketAddress(programId, dealer, 1314, nvda.fridayTargetTs).equals(marketAddress(programId, dealer, 1435, tsla.fridayTargetTs))).toBe(false);
+    expect(() => buildRealMarketParams({ symbol: "XYZ", dateEt: "2026-11-06", nowS: NOW, quoteKey, multiplier: flat })).toThrow(Refusal);
+  });
+
   it("encodes to the IDL's MarketParams and the IDL's create_market accounts", () => {
     const idl = JSON.parse(readFileSync(new URL("../idl/gap_cover.json", import.meta.url), "utf8"));
     const p = buildRealMarketParams({ dateEt: "2026-11-06", nowS: NOW, quoteKey, multiplier: flat });
     const programId = Keypair.generate().publicKey, dealer = Keypair.generate().publicKey;
-    const { market, ix } = createMarketInstruction(programId, dealer, Keypair.generate().publicKey, Keypair.generate().publicKey, p.fridayTargetTs, encodeMarketParams(p));
+    const { market, ix } = createMarketInstruction(programId, dealer, Keypair.generate().publicKey, Keypair.generate().publicKey, p);
     const d: any = new BorshCoder(idl).instruction.decode(Buffer.from(ix.data))!;
     expect(d.name).toBe("create_market");
     const q = d.data.params;
     expect([q.friday_target_ts.toString(), q.monday_target_ts.toString(), q.buying_close_ts.toString()]).toEqual([p.fridayTargetTs, p.mondayTargetTs, p.buyingCloseTs].map(String));
+    expect(q.feed_id).toBe(1314);
+    expect(q.exponent).toBe(-5);
     expect(q.sandbox).toBe(false);
     expect(q.demo_authority.equals(PublicKey.default)).toBe(true);
     expect(q.max_contracts).toBe(DEFAULT_MAX_CONTRACTS);

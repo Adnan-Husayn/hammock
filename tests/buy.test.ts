@@ -32,7 +32,7 @@ async function setup(o: Opts = {}) {
   const quoteKey = Keypair.generate();
   const demo = Keypair.generate();
   h.context.airdrop(demo.publicKey, 1_000_000_000n);
-  const market = pda(h, [Buffer.from("market"), h.payer.publicKey.toBuffer(), i64le(FRIDAY)]);
+  const market = pda(h, [Buffer.from("market"), h.payer.publicKey.toBuffer(), u32le(1314), i64le(FRIDAY)]);
   const a = {
     market,
     vaultAuthority: pda(h, [Buffer.from("vault"), market.toBuffer()]),
@@ -42,6 +42,7 @@ async function setup(o: Opts = {}) {
   };
   const sandbox = o.sandbox ?? true;
   const params = {
+    feedId: 1314, exponent: -5,
     fridayTargetTs: new BN(FRIDAY), mondayTargetTs: new BN(MONDAY), buyingCloseTs: new BN(MONDAY - 3600),
     bandLowerBps: 100, bandUpperBps: 500, fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10,
     maxContracts: o.maxContracts ?? 50, bountyPerLeg: new BN(100_000), dealerQuoteKey: quoteKey.publicKey,
@@ -49,7 +50,7 @@ async function setup(o: Opts = {}) {
   };
   await warpTo(h.context, FRIDAY - 7200);
   const ix = await h.program.methods.createMarket(params).accounts({
-    dealer: h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: usdc, nvdaxMint: nvdax,
+    dealer: h.payer.publicKey, market, vaultAuthority: a.vaultAuthority, usdcMint: usdc, stockMint: nvdax,
     escrow: a.escrow, collateralReserve: a.collateralReserve, bountyReserve: a.bountyReserve,
     dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   }).instruction();
@@ -155,7 +156,7 @@ describe("buy", () => {
     c.now = FRIDAY + 7 * 60 + 1;
     await warpTo(c.h.context, c.now);
     const fin = await c.h.program.methods.finaliseFriday().accounts({
-      caller: c.h.payer.publicKey, market: c.a.market, vaultAuthority: c.a.vaultAuthority, usdcMint: c.usdc, nvdaxMint: c.nvdax,
+      caller: c.h.payer.publicKey, market: c.a.market, vaultAuthority: c.a.vaultAuthority, usdcMint: c.usdc, stockMint: c.nvdax,
       escrow: c.a.escrow, collateralReserve: c.a.collateralReserve, bountyReserve: c.a.bountyReserve,
       submitterUsdc: subUsdc, dealerUsdc: c.dealerUsdc, tokenProgram: TOKEN_PROGRAM_ID,
     }).instruction();
