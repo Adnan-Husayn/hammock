@@ -12,6 +12,7 @@ primary_region = "iad"
   DEALER_KEYPAIR = "/run/keys/dealer.json"
   DEMO_AUTHORITY_KEYPAIR = "/run/keys/demo.json"
   RELAY_KEYPAIR = "/run/keys/relay.json"
+  FAUCET_KEYPAIR = "/run/keys/faucet.json"
   SERVICE_PORT = "8787"
   TRUST_PROXY = "1"
   # Mirrors auto_stop_machines below. The service logs an error at startup when REAL_MARKETS is set and this is not "off".
@@ -28,6 +29,10 @@ primary_region = "iad"
 [[files]]
   guest_path = "/run/keys/relay.json"
   secret_name = "RELAY_KEY_B64"
+
+[[files]]
+  guest_path = "/run/keys/faucet.json"
+  secret_name = "FAUCET_KEY_B64"
 
 [[files]]
   guest_path = "/app/config/devnet.json"
