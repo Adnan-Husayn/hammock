@@ -279,3 +279,21 @@ button.quiet { border-color:var(--rule); color:var(--ink-2); min-height:40px; }
   .landing .actions button { flex:1 1 100%; }
   .facts { grid-template-columns:1fr 1fr; }
 }
+
+/* Fix pass: header on one row of pills, paired marks, review labels, settlement marker */
+@media (min-width:561px) {
+  .top { grid-template-columns:auto 1fr auto; grid-template-areas:"brand pills wallet" "utils utils utils"; }
+  .top .picker { flex-wrap:nowrap; justify-content:flex-start; }
+  .top .utils { justify-self:end; }
+  .facts-terms { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .facts-marks { grid-template-columns:repeat(2, minmax(0,1fr)); }
+}
+.facts-terms { margin-bottom:4px; }
+.facts-marks { margin-top:4px; padding-top:8px; border-top:1px dashed var(--rule); }
+.facts-marks .marks-note { grid-column:1 / -1; margin:0; }
+.review { grid-template-columns:max-content 1fr; }
+.review dt { min-width:8.5em; white-space:nowrap; }
+.review dd { text-align:left; }
+.chart .dot-mark { fill:var(--ink); stroke:var(--ink); }
+.chart .mark-label { fill:var(--ink); font:600 14px var(--grot); font-variant-numeric:tabular-nums; }
+.chart .mark-label.is-verified { fill:var(--proof); }
