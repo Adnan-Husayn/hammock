@@ -7,7 +7,8 @@ export function loadLedger(): CoverRecord[] {
   try {
     const raw = globalThis.localStorage?.getItem(LEDGER_KEY);
     const v = raw ? JSON.parse(raw) : [];
-    return Array.isArray(v) ? v.filter((c) => c && c.kind === "demo") : [];
+    // An unfinished demo is not a position: only Claimed and Expired demo runs survive a reload.
+    return Array.isArray(v) ? v.filter((c) => c && c.kind === "demo" && (c.status === "Claimed" || c.status === "Expired, no payout")) : [];
   } catch {
     return [];
   }

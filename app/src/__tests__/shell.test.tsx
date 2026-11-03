@@ -263,3 +263,17 @@ describe("voided copy", () => {
     expect(screen.getByTestId("void-line").textContent).not.toMatch(/comes back/);
   });
 });
+
+describe("ledger on load", () => {
+  it("drops demo entries that never reached Claimed or Expired", async () => {
+    const { loadLedger } = await import("../lib/ledger");
+    const base = { kind: "demo", symbol: "NVDA", holding: 5000, contracts: 200, premium: 23.91, fridayPrice: 180, fridayAt: null, mondayAt: null, mondayPrice: null };
+    localStorage.setItem(LEDGER_KEY, JSON.stringify([
+      { ...base, id: "a", status: "Cover active" }, { ...base, id: "b", status: "Monday mark final" },
+      { ...base, id: "c", status: "Claimed" }, { ...base, id: "d", status: "Expired, no payout" },
+    ]));
+    expect(loadLedger().map((c) => c.id)).toEqual(["c", "d"]);
+    render(<App deps={deps({ market: null, wallet: false })} />);
+    expect(screen.getAllByTestId("ledger-row").map((r) => r.getAttribute("data-status"))).toEqual(["Claimed", "Expired, no payout"]);
+  });
+});
