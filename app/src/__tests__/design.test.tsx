@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import App from "../App";
-import { Calculator } from "../components/Calculator";
 import { Replays, DEMO_LABEL, DEMO_REPLAYS } from "../components/Replays";
-import { bandSlope, lossLine, PARTIAL_COVER_LABEL, readout, SAMPLE_PREMIUM, snapFall, stepFall } from "../lib/line";
+import { bandSlope, lossLine, readout, SAMPLE_PREMIUM, snapFall, stepFall } from "../lib/line";
 import { deps, market, OPEN } from "./fixtures";
 
 describe("payoff line maths", () => {
@@ -53,27 +52,6 @@ describe("marker stepping", () => {
     expect(snapFall(0.03004)).toBe(0.03);
     expect(snapFall(-1)).toBe(0);
   });
-  it("the handle steps by keyboard and updates the readout", () => {
-    render(<Calculator symbol="NVDA" premiumPerContract={0.12} />);
-    const handle = screen.getByRole("slider", { name: "Monday fall" });
-    expect(handle.getAttribute("aria-valuenow")).toBe("3");
-    for (let i = 0; i < 8; i++) fireEvent.keyDown(handle, { key: "ArrowRight" });
-    expect(handle.getAttribute("aria-valuenow")).toBe("5");
-    fireEvent.keyDown(handle, { key: "ArrowRight" });
-    expect(screen.getByTestId("net-loss").textContent).toBe("-$86.50"); // 5.25%: 262.50 - 200 + 24
-  });
-});
-
-describe("cover size", () => {
-  it("defaults to the suggested contracts and labels partial cover", () => {
-    render(<Calculator symbol="NVDA" />);
-    const input = screen.getByTestId("cover-input") as HTMLInputElement;
-    expect(input.value).toBe("200");
-    expect(screen.getByTestId("cover-note").textContent).toMatch(/flat/);
-    fireEvent.change(input, { target: { value: "120" } });
-    expect(screen.getByTestId("cover-note").textContent).toBe(PARTIAL_COVER_LABEL);
-    expect(screen.getByTestId("premium-note").textContent).toMatch(/sample/i);
-  });
 });
 
 describe("replays", () => {
@@ -106,11 +84,10 @@ describe("replays", () => {
 });
 
 describe("page", () => {
-  it("puts Test a full weekend at the top and keeps both price tracks apart", async () => {
+  it("keeps both price tracks apart and avoids promise words", async () => {
     const { container } = render(<App deps={deps({ market: market({ buyingClosed: true }) })} />);
     await screen.findByTestId("state-card");
-    const first = container.querySelector("section.card")!;
-    expect(first.getAttribute("data-testid")).toBe("quick-weekend");
+    await act(async () => fireEvent.click(screen.getByTestId("see-how")));
     expect(screen.getByText(/^decide the payout/)).toBeTruthy();
     expect(screen.getByText(/does not decide the payout/)).toBeTruthy();
     expect(container.textContent).not.toMatch(OPEN);

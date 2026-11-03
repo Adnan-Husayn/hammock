@@ -15,11 +15,11 @@ const CASES = [
 
 describe("market states", () => {
   for (const [name, m] of CASES) {
-    it(`${name}: renders a status line inside the one instrument`, async () => {
+    it(`${name}: renders one status line`, async () => {
       render(<App deps={deps({ market: m })} />);
       const card = await screen.findByTestId("state-card");
       expect(card.getAttribute("data-state")).toBe(name);
-      expect(screen.getByTestId("instrument").contains(card)).toBe(true);
+      expect(screen.getAllByTestId("state-card").length).toBe(1);
     });
   }
 });

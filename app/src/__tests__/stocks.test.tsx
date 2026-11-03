@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import App from "../App";
 import { Sandbox } from "../components/Sandbox";
-import { LockedView } from "../components/LockedView";
 import { enabledStocks, parseMarketList } from "../lib/markets";
 import { deps, market, OPEN, pk } from "./fixtures";
 
@@ -22,11 +21,10 @@ describe("stock picker", () => {
     const group = screen.getByRole("group", { name: "Stock" });
     expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["NVDA", "TSLA", "SPY", "AAPL"]);
     await screen.findByText("NVDA: Buying now");
-    expect(screen.getByText("Your cover at a 3% fall")).toBeTruthy();
+    expect(screen.getByTestId("holding-line").textContent).toBe("Your holding: $5,000 NVDAx");
     await act(async () => fireEvent.click(within(group).getByRole("button", { name: "TSLA" })));
     await screen.findByText("TSLA: Buying now");
-    expect(screen.getByText("TSLAx holding (USD)", { exact: false })).toBeTruthy();
-    expect(screen.getByText("TSLA fall by Monday", { exact: false })).toBeTruthy();
+    expect(screen.getByTestId("holding-line").textContent).toBe("Your holding: $5,000 TSLAx");
     expect((d.chain.readMarket as any).mock.calls.map((c: any[]) => c[0].toBase58())).toEqual([nvda.toBase58(), tsla.toBase58()]);
     await act(async () => fireEvent.click(within(group).getByRole("button", { name: "SPY" })));
     await screen.findByText("No live SPY market this weekend");
@@ -48,10 +46,14 @@ describe("stock picker", () => {
     expect(container.textContent).not.toMatch(OPEN);
   });
 
-  it("locked view prices off the market's own stock", async () => {
-    const d = deps({ market: market() });
-    render(<LockedView deps={d} market={pk()} info={market({ buyingClosed: true, feedId: 1435 })} />);
-    await screen.findByText(/live TSLAx price/);
+  it("an active cover prices the weekend estimate off the market's own stock", async () => {
+    const d = deps({ market: market({ feedId: 1435 }) });
+    d.chain.readPosition = async () => ({ contracts: 200, premiumPaid: 24_000_000n, lastNonce: 1n, closed: false });
+    d.realMarkets = { NVDA: null, TSLA: pk(), SPY: null, AAPL: null };
+    render(<App deps={d} />);
+    await act(async () => fireEvent.click(within(screen.getByRole("group", { name: "Stock" })).getByRole("button", { name: "TSLA" })));
+    await screen.findByTestId("weekend-note");
     expect(d.chain.referencePrice).toHaveBeenCalledWith("TSLA");
+    expect(screen.getByTestId("weekend-note").textContent).toMatch(/^Weekend TSLAx, estimate\. Does not decide the payout\./);
   });
 });

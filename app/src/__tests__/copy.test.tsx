@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Ed25519Program, Transaction } from "@solana/web3.js";
 import App from "../App";
-import { LockedView } from "../components/LockedView";
 import { ProofScreen } from "../components/ProofScreen";
 import { Sandbox } from "../components/Sandbox";
 import { deps, market, NOW, OPEN, pk } from "./fixtures";
@@ -22,16 +21,12 @@ describe("copy", () => {
     });
   }
 
-  it("locked view and proof screen carry no \"open\"", async () => {
+  it("proof screen carries no \"open\"", async () => {
     const d = deps({ market: settled });
     d.service.archive = async (_m, leg) => [{
       feedTsUs: leg === "friday" ? settled.friday!.feedTsUs.toString() : settled.monday!.feedTsUs.toString(), timestampUs: "0",
       price: "0", exponent: -5, confidence: "1200", publishers: 21, session: "regular", hash: "ab",
     }];
-    const a = render(<LockedView deps={d} market={pk()} info={market({ buyingClosed: true })} />);
-    await screen.findByText(/estimate/i);
-    expect(a.container.textContent).not.toMatch(OPEN);
-    a.unmount();
     const b = render(<ProofScreen deps={d} market={pk()} info={settled} />);
     await screen.findAllByText("21");
     for (const label of ["Signed price", "Session", "Timestamp", "Publishers", "Confidence", "Escrow at finalisation, kept for payouts"]) {

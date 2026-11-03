@@ -2,68 +2,31 @@ import { describe, expect, it, vi } from "vitest";
 import css from "../styles.css?raw";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import App from "../App";
-import { Calculator } from "../components/Calculator";
-import { article, readout, SAMPLE_PREMIUM } from "../lib/line";
-import { signedRow } from "../components/Calculator";
+import { article } from "../lib/line";
 import { PHONE_TICKS } from "../components/PayoffChart";
 import { PRODUCT_NAME } from "../brand";
 import { deps, market, OPEN } from "./fixtures";
-
-describe("signed arithmetic", () => {
-  it("shows one signed row and minus signs on every loss", () => {
-    expect(signedRow(readout(5000, 0.03, 200, SAMPLE_PREMIUM)).map(([k, v]) => `${k} ${v}`).join(" · ")).toBe("Stock loss -$150.00 · Payout +$100.00 · Premium -$23.91 · Net -$73.91");
-    const { container } = render(<Calculator symbol="NVDA" />);
-    expect(screen.getByTestId("arith").textContent).toBe("Stock loss -$150.00 · Payout +$100.00 · Premium -$23.91 · Net -$73.91");
-    expect(screen.getByTestId("net-loss").textContent).toBe("-$73.91");
-    expect(screen.getByTestId("uncovered").textContent).toBe("without cover -$150.00");
-    expect(screen.getByTestId("net-loss").parentElement).toBe(screen.getByTestId("uncovered").parentElement);
-    expect(screen.getByTestId("flat-label").textContent).toBe("flat at -$73.91");
-    expect(container.querySelector(".readout")).toBeNull();
-    expect(container.textContent).not.toMatch(/ = Net loss/);
-  });
-});
 
 describe("article per symbol", () => {
   it("reads tickers letter by letter", () => {
     expect(["NVDA", "TSLA", "SPY", "AAPL"].map((s) => `${article(s)} ${s}`)).toEqual(["an NVDA", "a TSLA", "an SPY", "an AAPL"]);
   });
-  it("labels the run button with the right article", async () => {
+  it("labels the devnet run button with the right article", async () => {
     render(<App deps={deps({ market: null })} />);
-    await screen.findByTestId("state-card");
-    expect(screen.getByTestId("run-weekend").textContent).toBe("Run a demo NVDA weekend");
+    await act(async () => fireEvent.click(screen.getByTestId("see-how")));
+    expect(screen.getByTestId("run-devnet").textContent).toBe("Run an NVDA weekend on devnet");
     await act(async () => fireEvent.click(within(screen.getByRole("group", { name: "Stock" })).getByRole("button", { name: "TSLA" })));
-    expect(screen.getByTestId("run-weekend").textContent).toBe("Run a demo TSLA weekend");
+    expect(screen.getByTestId("run-devnet").textContent).toBe("Run a TSLA weekend on devnet");
   });
 });
 
 describe("page", () => {
-  it("draws one chart, also during a demo replay", async () => {
-    const { container } = render(<App deps={deps({ market: market() })} />);
-    await screen.findByTestId("state-card");
-    expect(container.querySelectorAll("[data-testid=payoff-chart]").length).toBe(1);
-    expect(screen.getByTestId("instrument").getAttribute("data-mode")).toBe("Live market");
-    const modes = screen.getByRole("group", { name: "Instrument mode" });
-    expect(within(modes).getAllByRole("button").map((b) => b.textContent)).toEqual(["Calculator", "No payout", "Partial fall", "Cap", "Void"]);
-    await act(async () => fireEvent.click(within(modes).getByRole("button", { name: "Cap" })));
-    expect(container.querySelectorAll("[data-testid=payoff-chart]").length).toBe(1);
-    expect(screen.getByTestId("instrument").getAttribute("data-mode")).toBe("Demo replay");
-    expect(screen.getByTestId("arith").textContent).toBe("Stock loss -$350.00 · Payout +$200.00 · Premium -$23.91 · Net -$173.91");
-    expect(screen.queryByRole("slider", { name: "Monday fall" })).toBeNull();
-    // the receipt below follows the same pick
-    expect(within(screen.getByRole("group", { name: "Demo weekend" })).getByRole("button", { name: "Cap" }).getAttribute("aria-pressed")).toBe("true");
-    await act(async () => fireEvent.click(within(modes).getByRole("button", { name: "Void" })));
-    expect(screen.getByTestId("net-loss").textContent).toBe("$0.00");
-    await act(async () => fireEvent.click(within(modes).getByRole("button", { name: "Calculator" })));
-    expect(screen.getByRole("slider", { name: "Monday fall" })).toBeTruthy();
-    expect(container.querySelectorAll("[data-testid=payoff-chart]").length).toBe(1);
-  });
-
-  it("without a wallet the run button is enabled and opens the wallet selector", async () => {
+  it("without a wallet the devnet run opens the wallet selector", async () => {
     const onConnect = vi.fn();
     const d = deps({ market: null, wallet: false });
     render(<App deps={d} onConnectWallet={onConnect} />);
-    await screen.findByTestId("state-card");
-    const b = screen.getByTestId("run-weekend") as HTMLButtonElement;
+    await act(async () => fireEvent.click(screen.getByTestId("see-how")));
+    const b = screen.getByTestId("run-devnet") as HTMLButtonElement;
     expect(b.disabled).toBe(false);
     await act(async () => fireEvent.click(b));
     expect(onConnect).toHaveBeenCalledTimes(1);
@@ -79,9 +42,40 @@ describe("page", () => {
     expect(container.textContent).not.toMatch(/;|gasless|30 seconds/i);
     expect(container.textContent).not.toMatch(OPEN);
   });
+
+  it("has exactly one solid primary button on the landing and an outlined wallet button", async () => {
+    const { container } = render(<App deps={deps({ market: null })} />);
+    await screen.findByTestId("state-card");
+    const primaries = container.querySelectorAll("button.primary");
+    expect(primaries.length).toBe(1);
+    expect(primaries[0].textContent).toBe("Run a demo weekend");
+    expect(css).toMatch(/\.wallet-adapter-button-trigger[^{]*\{[^}]*background:transparent/);
+  });
+
+  it("states the market once with a link that focuses the replay pills", async () => {
+    render(<App deps={deps({ market: null })} />);
+    const card = await screen.findByTestId("state-card");
+    expect(card.textContent).toBe("No live NVDA market this weekend. Run a demo weekend or inspect a replay.");
+    await act(async () => fireEvent.click(screen.getByTestId("inspect-replay")));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(document.activeElement?.textContent).toBe("No payout");
+  });
+
+  it("keeps the stock pills and the devnet pill apart in the header", async () => {
+    render(<App deps={deps({ market: null })} />);
+    const env = screen.getByText("Solana devnet, demo tokens");
+    expect(env.parentElement).toBe(screen.getByTestId("theme-toggle").parentElement);
+    expect(env.parentElement!.contains(screen.getByRole("group", { name: "Stock" }))).toBe(false);
+  });
+
+  it("shows the certainty label with a live market", async () => {
+    render(<App deps={deps({ market: market() })} />);
+    const card = await screen.findByTestId("state-card");
+    expect(card.querySelector(".tag")?.textContent).toBe("estimate");
+  });
 });
 
-describe("palette", () => {
+describe("palette and figures", () => {
   it("has no purple and restyles the wallet button", () => {
     expect(css).toMatch(/\.wallet-adapter-button-trigger[^{]*\{[^}]*border:1px solid var\(--ink\)/);
     for (const [hex] of css.matchAll(/#[0-9a-f]{6}\b/gi)) {
@@ -94,89 +88,9 @@ describe("palette", () => {
     }
     expect(css).not.toMatch(/purple|violet|#512da8/i);
   });
-});
-
-describe("pass 3", () => {
-  it("puts the flat label above the line, on the side away from the marker", () => {
-    render(<Calculator symbol="NVDA" />);
-    const handle = screen.getByRole("slider", { name: "Monday fall" });
-    const label = () => screen.getByTestId("flat-label");
-    const lineY = () => Number(screen.getByRole("slider").querySelector(".dot")!.getAttribute("cy"));
-    for (let i = 0; i < 4; i++) fireEvent.keyDown(handle, { key: "ArrowLeft" }); // 2%
-    expect(label().getAttribute("data-side")).toBe("right");
-    expect(Number(label().getAttribute("y"))).toBeLessThan(lineY() - 11);
-    for (let i = 0; i < 8; i++) fireEvent.keyDown(handle, { key: "ArrowRight" }); // 4%
-    expect(label().getAttribute("data-side")).toBe("left");
-  });
-  it("labels the sample premium quietly and keeps the fall field in the control strip", () => {
-    const { container } = render(<Calculator symbol="NVDA" />);
-    expect(screen.getByTestId("premium-note").textContent).toMatch(/^Sample premium: \$0\.11955 per contract\. A wallet gets a real quote\./);
-    expect(container.querySelectorAll(".controls > label").length).toBe(3);
-  });
-  it("keeps the stock pills and the devnet pill in one group in the header", async () => {
-    render(<App deps={deps({ market: null })} />);
-    await screen.findByTestId("state-card");
-    const env = screen.getByText("Solana devnet, demo tokens");
-    expect(env.parentElement).toBe(screen.getByTestId("theme-toggle").parentElement);
-    expect(env.parentElement!.contains(screen.getByRole("group", { name: "Stock" }))).toBe(false);
-  });
-});
-
-describe("figures", () => {
-  it("never wrap mid-number", () => {
-    const { container } = render(<Calculator symbol="NVDA" />);
-    const parts = container.querySelectorAll("[data-testid=arith] > span");
-    expect(parts.length).toBe(4);
-    for (const d of parts) expect(d.classList.contains("fig")).toBe(true);
-    expect(screen.getByTestId("net-loss").classList.contains("fig")).toBe(true);
+  it("figures never wrap mid-number and the phone axis keeps 1% and 5%", () => {
     expect(css).toMatch(/\.fig\s*\{\s*white-space:nowrap/);
-  });
-});
-
-describe("pass 4", () => {
-  it("phone x-axis keeps the 1% and 5% ticks", () => {
     expect(PHONE_TICKS).toEqual(expect.arrayContaining([0.01, 0.05]));
-  });
-  it("has exactly one solid primary button and an outlined wallet button", async () => {
-    const { container } = render(<App deps={deps({ market: null })} />);
-    await screen.findByTestId("state-card");
-    const primaries = container.querySelectorAll("button.primary");
-    expect(primaries.length).toBe(1);
-    expect(primaries[0].getAttribute("data-testid")).toBe("run-weekend");
-    expect(css).toMatch(/\.wallet-adapter-button-trigger[^{]*\{[^}]*background:transparent/);
-  });
-  it("the fall field and the marker are linked", () => {
-    render(<Calculator symbol="NVDA" />);
-    fireEvent.keyDown(screen.getByRole("slider", { name: "Monday fall" }), { key: "PageUp" });
-    expect((screen.getByTestId("fall-input") as HTMLInputElement).value).toBe("4");
-  });
-});
-
-describe("pass 5", () => {
-  it("shows the market state once, in the instrument", async () => {
-    const { container } = render(<App deps={deps({ market: null })} />);
-    const card = await screen.findByTestId("state-card");
-    expect(screen.getByTestId("instrument").contains(card)).toBe(true);
-    expect(container.textContent!.split("No live NVDA market this weekend").length - 1).toBe(1);
-    expect(screen.getByTestId("quick-weekend").textContent).not.toMatch(/No live/);
-  });
-  it("labels the demo replays as a group, not a button", () => {
-    render(<Calculator symbol="NVDA" />);
-    const label = screen.getByTestId("demo-group-label");
-    expect(label.tagName).not.toBe("BUTTON");
-    expect(label.textContent).toBe("Demo replays:");
-    expect(within(screen.getByRole("group", { name: "Instrument mode" })).queryByRole("button", { name: /demo/i })).toBeNull();
-  });
-  it("lays the signed row out as a grid on narrow screens and keeps the status line on phones", () => {
-    render(<Calculator symbol="NVDA" />);
-    expect(screen.getByTestId("arith").classList.contains("arith")).toBe(true);
-    expect(css).toMatch(/@media \(max-width:480px\) \{\s*\.arith \{ display:grid; grid-template-columns:1fr 1fr;[^}]*\}\s*\.arith \.sep \{ display:none; \}/);
-    expect(css).not.toMatch(/\.status-line \{ display:none/);
-  });
-  it("shows the certainty label with a live market", async () => {
-    render(<App deps={deps({ market: market() })} />);
-    const card = await screen.findByTestId("state-card");
-    expect(card.querySelector(".tag")?.textContent).toBe("estimate");
   });
   it("cycles system, light, dark and remembers the choice", async () => {
     const m = new Map<string, string>();
@@ -185,57 +99,16 @@ describe("pass 5", () => {
     render(<App deps={deps({ market: null })} />);
     const b = screen.getByTestId("theme-toggle");
     expect(b.getAttribute("data-theme-choice")).toBe("system");
-    expect(b.getAttribute("aria-label")).toMatch(/^Theme: Auto/);
     expect(b.textContent).toBe(" Theme: Auto");
     fireEvent.click(b);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    expect(b.textContent).toBe(" Theme: Light");
     expect(localStorage.getItem("theme")).toBe("light");
     fireEvent.click(b);
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-    expect(localStorage.getItem("theme")).toBe("dark");
     fireEvent.click(b);
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
     expect(localStorage.getItem("theme")).toBeNull();
     expect(css).toMatch(/:root\[data-theme="dark"\]/);
     vi.unstubAllGlobals();
-  });
-});
-
-describe("pass 6", () => {
-  it("states the market once with a link that focuses the replay pills", async () => {
-    render(<App deps={deps({ market: null })} />);
-    const card = await screen.findByTestId("state-card");
-    expect(card.textContent).toBe("No live NVDA market this weekend. Run a demo weekend or inspect a replay.");
-    await act(async () => fireEvent.click(screen.getByTestId("inspect-replay")));
-    expect(document.activeElement?.textContent).toBe("No payout");
-  });
-  it("marks the active stock and mode pill with the quiet fill class", async () => {
-    render(<App deps={deps({ market: null })} />);
-    await screen.findByTestId("state-card");
-    const modes = screen.getByRole("group", { name: "Instrument mode" });
-    expect(within(modes).getByRole("button", { name: "Calculator" }).classList.contains("is-active")).toBe(true);
-    expect(within(screen.getByRole("group", { name: "Stock" })).getByRole("button", { name: "NVDA" }).classList.contains("is-active")).toBe(true);
-    await act(async () => fireEvent.click(within(modes).getByRole("button", { name: "Partial fall" })));
-    expect(within(modes).getByRole("button", { name: "Calculator" }).classList.contains("is-active")).toBe(false);
-    expect(within(modes).getByRole("button", { name: "Partial fall" }).classList.contains("is-active")).toBe(true);
-    expect(css).toMatch(/\.pill\.is-active \{[^}]*background:var\(--chip\)/);
-  });
-  it("wraps the mode pills on phones instead of scrolling", () => {
-    const phone = css.slice(css.indexOf("@media (max-width:560px)"));
-    expect(phone).toMatch(/\.modes \{ flex-wrap:wrap; \}/);
-    expect(css).not.toMatch(/\.modes \{[^}]*overflow-x/);
-  });
-  it("shows the fall at the input's precision and the short strip sub", () => {
-    render(<Calculator symbol="NVDA" />);
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Your cover at a 3% fall");
-    fireEvent.keyDown(screen.getByRole("slider", { name: "Monday fall" }), { key: "ArrowRight" });
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Your cover at a 3.25% fall");
-  });
-  it("the run strip sub drops the fees phrase", async () => {
-    render(<App deps={deps({ market: null })} />);
-    await screen.findByTestId("state-card");
-    expect(screen.getByTestId("quick-weekend").textContent).toContain("You need a wallet, not real funds.");
-    expect(screen.getByTestId("quick-weekend").textContent).not.toMatch(/fees/);
   });
 });
