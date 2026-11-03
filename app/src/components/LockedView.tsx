@@ -3,6 +3,7 @@ import type { PublicKey } from "@solana/web3.js";
 import type { AppDeps } from "../lib/api";
 import { fmtUsd, payoutPerContract, price, type MarketInfo, type PositionInfo } from "../lib/program";
 import { stockByFeed, tokenName } from "../lib/markets";
+import { StateTag } from "./StateTag";
 
 export function LockedView({ deps, market, info }: { deps: AppDeps; market: PublicKey; info: MarketInfo }) {
   const symbol = stockByFeed(info.feedId)?.symbol ?? null;
@@ -17,8 +18,11 @@ export function LockedView({ deps, market, info }: { deps: AppDeps; market: Publ
   return (
     <section className="card">
       <h2>Your cover</h2>
-      <p>Active contracts: {position && !position.closed ? position.contracts : 0}</p>
-      <p>{per === null ? "No estimate available right now." : `Estimate from the live ${tokenName(symbol ?? "")} price, not a final figure: ${fmtUsd(per)} per contract${position ? `, ${fmtUsd(per * position.contracts)} in all` : ""}.`}</p>
+      <p>Active contracts: <span className="num">{position && !position.closed ? position.contracts : 0}</span></p>
+      <p className="estimate-line">
+        <StateTag kind="estimate" />{" "}
+        {per === null ? "Not available right now." : `From the live ${tokenName(symbol ?? "")} price, not a final figure: ${fmtUsd(per)} per contract${position ? `, ${fmtUsd(per * position.contracts)} in all` : ""}. The Monday morning mark decides the payout.`}
+      </p>
     </section>
   );
 }

@@ -7,6 +7,10 @@ import { LockedView } from "./components/LockedView";
 import { ProofScreen } from "./components/ProofScreen";
 import { Sandbox } from "./components/Sandbox";
 import { Settle } from "./components/Settle";
+import { PriceTracks } from "./components/PriceTracks";
+import { Replays } from "./components/Replays";
+import { QuickWeekend } from "./components/Sandbox";
+import { StateTag, type Certainty } from "./components/StateTag";
 import { enabledStocks } from "./lib/markets";
 
 /** Market buying close in New York time, for example "Sunday 17:50". */
@@ -33,6 +37,9 @@ const COPY: Record<Phase, [string, string]> = {
   voided: ["Voided", "This market did not settle. Refund your premium below."],
 };
 
+/** How settled the market is, shown on the market card. */
+const CERTAINTY: Record<Phase, Certainty | null> = { none: null, created: "observed", buying: "estimate", locked: "estimate", settled: "final", voided: "final" };
+
 export default function App({ deps, walletButton }: { deps: AppDeps; walletButton?: ReactNode }) {
   const [info, setInfo] = useState<MarketInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -53,17 +60,24 @@ export default function App({ deps, walletButton }: { deps: AppDeps; walletButto
   }, [deps.chain, market]);
 
   const onQuote = useCallback((p: number) => setPremium(p), []);
+  const [sig, setSig] = useState<string | null>(null);
+  useEffect(() => setSig(null), [market]);
+  const openSandbox = () => {
+    setSandbox(true);
+    setTimeout(() => document.getElementById("sandbox")?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 0);
+  };
   const phase = phaseOf(info, (deps.now ?? Date.now)());
   const [title, copy] = COPY[phase].map((t) => t.replace("{sym}", symbol));
   const text = phase === "buying" && info ? `Buy cover until ${fmtEt(info.buyingCloseTs)} ET.` : copy;
 
+  const certainty = CERTAINTY[phase];
   return (
     <main>
       <header>
         <h1>Devnet preview</h1>
         {walletButton}
       </header>
-      <p className="lead">Private preview on Solana devnet, with demo tokens.</p>
+      <p className="lead">Cover for a {symbol} fall between the Friday afternoon mark and the Monday morning mark. Private preview on Solana devnet, with demo tokens.</p>
       <div className="row picker" role="group" aria-label="Stock">
         {stocks.map((s) => (
           <button key={s.symbol} aria-pressed={s.symbol === symbol} className={s.symbol === symbol ? "primary" : undefined} onClick={() => setSymbol(s.symbol)}>
@@ -71,19 +85,26 @@ export default function App({ deps, walletButton }: { deps: AppDeps; walletButto
           </button>
         ))}
       </div>
+      <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} />
+      <Calculator symbol={symbol} premiumPerContract={premium} onContracts={setContracts} />
       {loaded && (
         <section className="card state" data-testid="state-card" data-state={phase}>
-          <h2>{phase === "none" ? title : `${symbol}: ${title}`}</h2>
-          <p>{text}</p>
-          <button onClick={() => setSandbox(true)}>Try the sandbox</button>
+          <div className="card-head">
+            <h2>{phase === "none" ? title : `${symbol}: ${title}`}</h2>
+            {certainty && <StateTag kind={certainty} />}
+          </div>
+          {text && <p>{text}</p>}
+          {info && <PriceTracks deps={deps} info={info} symbol={symbol} />}
+          <button onClick={openSandbox}>Try the sandbox</button>
         </section>
       )}
-      <Calculator symbol={symbol} premiumPerContract={premium} onContracts={setContracts} />
       {market && info && phase === "buying" && <BuyPanel deps={deps} market={market} info={info} contracts={contracts} onQuote={onQuote} />}
       {market && info && phase === "locked" && <LockedView deps={deps} market={market} info={info} />}
-      {market && info && (phase === "settled" || phase === "voided") && <Settle deps={deps} market={market} info={info} />}
-      {market && info && (phase === "settled" || phase === "voided") && <ProofScreen deps={deps} market={market} info={info} />}
+      {market && info && (phase === "settled" || phase === "voided") && <Settle deps={deps} market={market} info={info} onSent={setSig} />}
+      {market && info && (phase === "settled" || phase === "voided") && <ProofScreen deps={deps} market={market} info={info} transferSig={sig} />}
       {sandbox && <Sandbox key={symbol} deps={deps} symbol={symbol} />}
+      <Replays deps={deps} />
+      <footer className="note">Devnet only. Prices on this page are labelled by source: Pyth marks decide payouts; token prices and demo prices do not.</footer>
     </main>
   );
 }

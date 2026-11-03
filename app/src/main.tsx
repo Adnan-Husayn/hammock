@@ -25,6 +25,8 @@ const realMarkets: Record<string, PublicKey | null> = Object.fromEntries(
   stocks.map((s) => [s.symbol, listed[s.symbol] ? new PublicKey(listed[s.symbol]) : null]),
 );
 const service = httpService(SERVICE, ARCHIVE);
+// VITE_VERIFIED_MARKET names a real settled market for the Verified replay. Empty until one exists.
+const verifiedMarket = env.VITE_VERIFIED_MARKET ? new PublicKey(env.VITE_VERIFIED_MARKET) : null;
 
 function chainApi(conn: Connection): ChainApi {
   return {
@@ -72,6 +74,7 @@ function Connected() {
     realMarket: null,
     realMarkets,
     stocks,
+    verifiedMarket,
   }), [connection, publicKey, signTransaction]);
   return <App deps={deps} walletButton={<WalletMultiButton />} />;
 }

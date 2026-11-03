@@ -60,6 +60,8 @@ export type AppDeps = {
   realMarkets?: Record<string, PublicKey | null>;
   /** Stocks the picker offers, first is the default. Defaults to enabledStocks(). */
   stocks?: Stock[];
+  /** A real settled market for the Verified replay. Empty until one exists. */
+  verifiedMarket?: PublicKey | null;
   now?: () => number;
 };
 

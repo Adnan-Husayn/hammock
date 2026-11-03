@@ -7,56 +7,117 @@ import { BuyPanel } from "./BuyPanel";
 import { ProofScreen } from "./ProofScreen";
 import { Settle } from "./Settle";
 
-export function Sandbox({ deps, symbol }: { deps: AppDeps; symbol: string }) {
+/** Shared sandbox state: start a market, buy, ring the bell, settle. */
+function useSandbox(deps: AppDeps, symbol: string) {
   const [market, setMarket] = useState<PublicKey | null>(null);
   const [info, setInfo] = useState<MarketInfo | null>(null);
   const [bought, setBought] = useState(false);
   const [rung, setRung] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [faucetCount, setFaucetCount] = useState(0);
+  const [sig, setSig] = useState<string | null>(null);
 
   const run = async (f: () => Promise<void>) => {
     setBusy(true);
     setNote(null);
     try { await f(); } catch (e) { setNote(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
-  const [faucetCount, setFaucetCount] = useState(0);
-  const start = (mode: "gap" | "multiplierVoid") => run(async () => {
+  const startMarket = async (mode: "gap" | "multiplierVoid") => {
     const r = await deps.service.startSandbox(mode, symbol);
     const m = new PublicKey(r.market);
-    setBought(false); setRung(false);
+    setBought(false); setRung(false); setSig(null);
     setMarket(m);
     setInfo(await deps.chain.readMarket(m));
-    setNote(`${symbol} Friday afternoon mark set at ${fmtUsd(price(BigInt(r.fridayPrice)))}.`);
-  });
-  const faucet = () => run(async () => {
+    return r;
+  };
+  const fund = async () => {
     if (!deps.wallet) throw new Error("Connect a wallet first");
     await deps.service.faucet(deps.wallet.publicKey.toBase58(), symbol);
-    setNote(`Demo USDC and ${tokenName(symbol)} (test) sent to your wallet.`);
     setFaucetCount((n) => n + 1);
-  });
-  const bell = () => run(async () => {
-    const r = await deps.service.bell(market!.toBase58());
+  };
+  const ring = async (m: PublicKey) => {
+    const r = await deps.service.bell(m.toBase58());
     setRung(true);
-    const settled = await deps.chain.readMarket(market!);
+    const settled = await deps.chain.readMarket(m);
     setInfo(settled);
-    setNote(settled?.state === "Voided" ? "The share multiplier changed, so this market is void. Refund your premium below." : r.fallBps === null ? "This market settled with no payout." : `${symbol} Monday morning mark: ${fmtUsd(price(BigInt(r.mondayPrice)))}, a fall of ${(r.fallBps / 100).toFixed(2)}%.`);
+    return settled?.state === "Voided" ? "The share multiplier changed, so this market is void. Refund your premium below."
+      : r.fallBps === null ? "This market settled with no payout."
+      : `${symbol} Monday morning mark: ${fmtUsd(price(BigInt(r.mondayPrice)))}, a fall of ${(r.fallBps / 100).toFixed(2)}%.`;
+  };
+  return { market, info, bought, setBought, rung, note, setNote, busy, faucetCount, sig, setSig, run, startMarket, fund, ring };
+}
+
+export function Sandbox({ deps, symbol }: { deps: AppDeps; symbol: string }) {
+  const s = useSandbox(deps, symbol);
+  const start = (mode: "gap" | "multiplierVoid") => s.run(async () => {
+    const r = await s.startMarket(mode);
+    s.setNote(`${symbol} Friday afternoon mark set at ${fmtUsd(price(BigInt(r.fridayPrice)))}.`);
   });
-  const onBought = useCallback(() => { setBought(true); setNote("Cover bought: 200 contracts. Now ring the Monday bell."); }, []);
+  const faucet = () => s.run(async () => {
+    await s.fund();
+    s.setNote(`Demo USDC and ${tokenName(symbol)} (test) sent to your wallet.`);
+  });
+  const bell = () => s.run(async () => s.setNote(await s.ring(s.market!)));
+  const onBought = useCallback(() => { s.setBought(true); s.setNote("Cover bought: 200 contracts. Now ring the Monday bell."); }, []);
 
   return (
     <section className="card" id="sandbox">
       <h2>{symbol} sandbox</h2>
       <p>Devnet only, with demo tokens. Fees are paid for you. Run a whole weekend in seconds.</p>
       <div className="row">
-        <button disabled={busy} onClick={faucet}>Get demo tokens</button>
-        <button disabled={busy} onClick={() => start("gap")}>Start in gap mode</button>
-        <button disabled={busy} onClick={() => start("multiplierVoid")}>Start in multiplier-void mode</button>
+        <button disabled={s.busy} onClick={faucet}>Get demo tokens</button>
+        <button disabled={s.busy} onClick={() => start("gap")}>Start in gap mode</button>
+        <button disabled={s.busy} onClick={() => start("multiplierVoid")}>Start in multiplier-void mode</button>
       </div>
-      {note && <p className="note">{note}</p>}
-      {market && info && !rung && !bought && <BuyPanel deps={deps} market={market} info={info} contracts={200} onBought={onBought} balanceNonce={faucetCount} />}
-      {bought && !rung && <button className="primary" disabled={busy} onClick={bell}>Ring the Monday bell</button>}
-      {market && info && rung && <><Settle deps={deps} market={market} info={info} /><ProofScreen deps={deps} market={market} info={info} /></>}
+      {s.note && <p className="note">{s.note}</p>}
+      {s.market && s.info && !s.rung && !s.bought && <BuyPanel deps={deps} market={s.market} info={s.info} contracts={200} onBought={onBought} balanceNonce={s.faucetCount} />}
+      {s.bought && !s.rung && <button className="primary" disabled={s.busy} onClick={bell}>Ring the Monday bell</button>}
+      {s.market && s.info && s.rung && <><Settle deps={deps} market={s.market} info={s.info} onSent={s.setSig} /><ProofScreen deps={deps} market={s.market} info={s.info} transferSig={s.sig} /></>}
+    </section>
+  );
+}
+
+const STEPS = ["Demo tokens", "Friday mark", "Buy 200 contracts", "Monday bell", "Claim"] as const;
+
+/**
+ * "Test a full weekend": one press funds the wallet and starts a gap-mode market, the buy is one signature,
+ * the Monday bell rings by itself after the buy, and the claim is the last signature. Fees are paid for you.
+ */
+export function QuickWeekend({ deps, symbol }: { deps: AppDeps; symbol: string }) {
+  const s = useSandbox(deps, symbol);
+  const [step, setStep] = useState(0);
+  const go = () => s.run(async () => {
+    setStep(0);
+    try { await s.fund(); } catch (e) {
+      if (!deps.wallet) throw e;
+      s.setNote("Demo tokens were not sent; trying with what the wallet holds.");
+    }
+    setStep(1);
+    const r = await s.startMarket("gap");
+    setStep(2);
+    s.setNote(`${symbol} Friday afternoon mark set at ${fmtUsd(price(BigInt(r.fridayPrice)))}. Buy below.`);
+  });
+  const onBought = useCallback(() => {
+    s.setBought(true);
+    setStep(3);
+    s.run(async () => { s.setNote(await s.ring(s.market!)); setStep(4); });
+  }, [s.market]);
+  const onSent = useCallback((sig: string) => { s.setSig(sig); setStep(5); }, []);
+  return (
+    <section className="card quick" id="weekend" data-testid="quick-weekend">
+      <div className="card-head">
+        <h2>Test a full weekend</h2>
+        <span className="note">Devnet, demo tokens, fees paid for you</span>
+      </div>
+      <ol className="steps">
+        {STEPS.map((t, i) => <li key={t} data-done={i < step} data-now={i === step && (s.market !== null || s.busy)}>{t}</li>)}
+      </ol>
+      <button className="primary" disabled={s.busy || !deps.wallet} onClick={go}>{s.market ? "Run another weekend" : `Run a ${symbol} weekend`}</button>
+      {!deps.wallet && <p className="note">Connect a wallet to run it; no tokens needed. Or play a demo replay below without one.</p>}
+      {s.note && <p className="note">{s.note}</p>}
+      {s.market && s.info && !s.rung && !s.bought && <BuyPanel deps={deps} market={s.market} info={s.info} contracts={200} onBought={onBought} balanceNonce={s.faucetCount} />}
+      {s.market && s.info && s.rung && <><Settle deps={deps} market={s.market} info={s.info} onSent={onSent} /><ProofScreen deps={deps} market={s.market} info={s.info} transferSig={s.sig} contracts={200} /></>}
     </section>
   );
 }
