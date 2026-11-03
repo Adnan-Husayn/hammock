@@ -15,11 +15,11 @@ const CASES = [
 
 describe("market states", () => {
   for (const [name, m] of CASES) {
-    it(`${name}: renders a state card and Try the sandbox`, async () => {
+    it(`${name}: renders a status line inside the one instrument`, async () => {
       render(<App deps={deps({ market: m })} />);
       const card = await screen.findByTestId("state-card");
       expect(card.getAttribute("data-state")).toBe(name);
-      expect(screen.getByRole("button", { name: "Try the sandbox" })).toBeTruthy();
+      expect(screen.getByTestId("instrument").contains(card)).toBe(true);
     });
   }
 });

@@ -11,6 +11,8 @@ import { PriceTracks } from "./components/PriceTracks";
 import { Replays } from "./components/Replays";
 import { QuickWeekend } from "./components/Sandbox";
 import { StateTag, type Certainty } from "./components/StateTag";
+import type { ReplayView } from "./components/Calculator";
+import { PRODUCT_NAME } from "./brand";
 import { enabledStocks } from "./lib/markets";
 
 /** Market buying close in New York time, for example "Sunday 17:50". */
@@ -29,23 +31,24 @@ export function phaseOf(m: MarketInfo | null, nowMs: number): Phase {
 }
 
 const COPY: Record<Phase, [string, string]> = {
-  none: ["No {sym} market this weekend", "A new market appears before the Friday afternoon mark."],
-  created: ["Waiting for the Friday afternoon mark", "Buying starts once the Friday afternoon mark is final."],
+  none: ["No {sym} market this weekend", "The next one appears before the Friday afternoon mark."],
+  created: ["Waiting for the Friday afternoon mark", "Buying starts once it is final."],
   buying: ["Buying now", ""],
   locked: ["Locked", "Buying has ended. The payout is fixed at the Monday morning mark."],
   settled: ["Settled", "Both marks are final. Claim your payout below."],
   voided: ["Voided", "This market did not settle. Refund your premium below."],
 };
 
-/** How settled the market is, shown on the market card. */
+/** How settled the market is, shown in the status line. */
 const CERTAINTY: Record<Phase, Certainty | null> = { none: null, created: "observed", buying: "estimate", locked: "estimate", settled: "final", voided: "final" };
 
-export default function App({ deps, walletButton }: { deps: AppDeps; walletButton?: ReactNode }) {
+export default function App({ deps, walletButton, onConnectWallet }: { deps: AppDeps; walletButton?: ReactNode; onConnectWallet?: () => void }) {
   const [info, setInfo] = useState<MarketInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [contracts, setContracts] = useState(200);
   const [premium, setPremium] = useState<number | undefined>();
   const [sandbox, setSandbox] = useState(false);
+  const [replay, setReplay] = useState<ReplayView | null>(null);
   const stocks = deps.stocks?.length ? deps.stocks : enabledStocks();
   const [symbol, setSymbol] = useState(stocks[0].symbol);
   const market = deps.realMarkets ? deps.realMarkets[symbol] ?? null : deps.realMarket;
@@ -62,49 +65,58 @@ export default function App({ deps, walletButton }: { deps: AppDeps; walletButto
   const onQuote = useCallback((p: number) => setPremium(p), []);
   const [sig, setSig] = useState<string | null>(null);
   useEffect(() => setSig(null), [market]);
-  const openSandbox = () => {
-    setSandbox(true);
-    setTimeout(() => document.getElementById("sandbox")?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 0);
+  const showReplay = (v: ReplayView | null) => {
+    setReplay(v);
+    if (v) setTimeout(() => document.getElementById("instrument")?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 0);
   };
   const phase = phaseOf(info, (deps.now ?? Date.now)());
   const [title, copy] = COPY[phase].map((t) => t.replace("{sym}", symbol));
   const text = phase === "buying" && info ? `Buy cover until ${fmtEt(info.buyingCloseTs)} ET.` : copy;
-
   const certainty = CERTAINTY[phase];
+  const verified = deps.verifiedMarket ? "Last verified settlement available in replays." : "Demo replays available below.";
+
+  const status = loaded ? (
+    <p className="status" data-testid="state-card" data-state={phase}>
+      {certainty && <><StateTag kind={certainty} /> </>}
+      <strong>{phase === "none" ? title : `${symbol}: ${title}`}</strong>.
+      {text && <> {text}</>}
+      {" "}<a href="#replays">{verified}</a>
+    </p>
+  ) : null;
+
   return (
     <main>
-      <header>
-        <h1>Devnet preview</h1>
-        {walletButton}
-      </header>
-      <p className="lead">Cover for a {symbol} fall between the Friday afternoon mark and the Monday morning mark. Private preview on Solana devnet, with demo tokens.</p>
-      <div className="row picker" role="group" aria-label="Stock">
-        {stocks.map((s) => (
-          <button key={s.symbol} aria-pressed={s.symbol === symbol} className={s.symbol === symbol ? "primary" : undefined} onClick={() => setSymbol(s.symbol)}>
-            {s.symbol}
-          </button>
-        ))}
-      </div>
-      <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} />
-      <Calculator symbol={symbol} premiumPerContract={premium} onContracts={setContracts} />
-      {loaded && (
-        <section className="card state" data-testid="state-card" data-state={phase}>
-          <div className="card-head">
-            <h2>{phase === "none" ? title : `${symbol}: ${title}`}</h2>
-            {certainty && <StateTag kind={certainty} />}
+      <header className="top">
+        <span className="brand">{PRODUCT_NAME}</span>
+        <div className="top-right">
+          <div className="row picker" role="group" aria-label="Stock">
+            {stocks.map((s) => (
+              <button key={s.symbol} className="pill" aria-pressed={s.symbol === symbol} onClick={() => { setSymbol(s.symbol); setReplay(null); }}>
+                {s.symbol}
+              </button>
+            ))}
           </div>
-          {text && <p>{text}</p>}
-          {info && <PriceTracks deps={deps} info={info} symbol={symbol} />}
-          <button onClick={openSandbox}>Try the sandbox</button>
-        </section>
-      )}
+          <span className="badge env">Solana devnet, demo tokens</span>
+          {walletButton}
+        </div>
+      </header>
+      <h1 className="hero">Hold your stock token through the weekend without carrying the whole fall.</h1>
+      <p className="lead">If the Monday morning Pyth price is more than 1% below Friday afternoon's, you get paid in USDC, up to the full payout at a 5% fall.</p>
+      <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} />
+      <div id="instrument">
+        <Calculator symbol={symbol} premiumPerContract={premium} onContracts={setContracts} status={status}
+          live={!!info && phase !== "none"} replay={replay} onExitReplay={() => setReplay(null)} />
+      </div>
+      {info && <section className="card"><PriceTracks deps={deps} info={info} symbol={symbol} /></section>}
       {market && info && phase === "buying" && <BuyPanel deps={deps} market={market} info={info} contracts={contracts} onQuote={onQuote} />}
       {market && info && phase === "locked" && <LockedView deps={deps} market={market} info={info} />}
       {market && info && (phase === "settled" || phase === "voided") && <Settle deps={deps} market={market} info={info} onSent={setSig} />}
       {market && info && (phase === "settled" || phase === "voided") && <ProofScreen deps={deps} market={market} info={info} transferSig={sig} />}
-      {sandbox && <Sandbox key={symbol} deps={deps} symbol={symbol} />}
-      <Replays deps={deps} />
-      <footer className="note">Devnet only. Prices on this page are labelled by source: Pyth marks decide payouts; token prices and demo prices do not.</footer>
+      <Replays deps={deps} onReplay={showReplay} />
+      {sandbox ? <Sandbox key={symbol} deps={deps} symbol={symbol} /> : (
+        <p className="note"><button className="link" onClick={() => setSandbox(true)}>Sandbox with step-by-step controls</button></p>
+      )}
+      <footer className="note">Devnet only. Pyth marks decide payouts. Token prices and demo prices do not.</footer>
     </main>
   );
 }

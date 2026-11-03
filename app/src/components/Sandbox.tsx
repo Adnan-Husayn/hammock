@@ -3,6 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { AppDeps } from "../lib/api";
 import { fmtUsd, price, type MarketInfo } from "../lib/program";
 import { tokenName } from "../lib/markets";
+import { article } from "../lib/line";
 import { BuyPanel } from "./BuyPanel";
 import { ProofScreen } from "./ProofScreen";
 import { Settle } from "./Settle";
@@ -64,7 +65,7 @@ export function Sandbox({ deps, symbol }: { deps: AppDeps; symbol: string }) {
   return (
     <section className="card" id="sandbox">
       <h2>{symbol} sandbox</h2>
-      <p>Devnet only, with demo tokens. Fees are paid for you. Run a whole weekend in seconds.</p>
+      <p>Devnet only, with demo tokens. Fees are covered.</p>
       <div className="row">
         <button disabled={s.busy} onClick={faucet}>Get demo tokens</button>
         <button disabled={s.busy} onClick={() => start("gap")}>Start in gap mode</button>
@@ -78,20 +79,20 @@ export function Sandbox({ deps, symbol }: { deps: AppDeps; symbol: string }) {
   );
 }
 
-const STEPS = ["Demo tokens", "Friday mark", "Buy 200 contracts", "Monday bell", "Claim"] as const;
+const STEPS = ["Demo tokens", "Friday mark", "Buy 200 contracts", "Monday mark", "Claim"] as const;
 
 /**
  * "Test a full weekend": one press funds the wallet and starts a gap-mode market, the buy is one signature,
  * the Monday bell rings by itself after the buy, and the claim is the last signature. Fees are paid for you.
  */
-export function QuickWeekend({ deps, symbol }: { deps: AppDeps; symbol: string }) {
+export function QuickWeekend({ deps, symbol, onConnect }: { deps: AppDeps; symbol: string; onConnect?: () => void }) {
   const s = useSandbox(deps, symbol);
   const [step, setStep] = useState(0);
   const go = () => s.run(async () => {
     setStep(0);
     try { await s.fund(); } catch (e) {
       if (!deps.wallet) throw e;
-      s.setNote("Demo tokens were not sent; trying with what the wallet holds.");
+      s.setNote("Demo tokens were not sent. Trying with what the wallet holds.");
     }
     setStep(1);
     const r = await s.startMarket("gap");
@@ -106,15 +107,18 @@ export function QuickWeekend({ deps, symbol }: { deps: AppDeps; symbol: string }
   const onSent = useCallback((sig: string) => { s.setSig(sig); setStep(5); }, []);
   return (
     <section className="card quick" id="weekend" data-testid="quick-weekend">
-      <div className="card-head">
-        <h2>Test a full weekend</h2>
-        <span className="note">Devnet, demo tokens, fees paid for you</span>
+      <div className="strip">
+        <div className="strip-text">
+          <h2>Run a full weekend on devnet</h2>
+          <p className="note">Demo tokens and fees are covered. You need a wallet, not real funds.</p>
+        </div>
+        <ol className="steps">
+          {STEPS.map((t, i) => <li key={t} data-done={i < step} data-now={i === step && (s.market !== null || s.busy)}>{t}</li>)}
+        </ol>
+        <button className="primary" data-testid="run-weekend" disabled={s.busy} onClick={deps.wallet ? go : onConnect}>
+          {s.market ? "Run another weekend" : `Run ${article(symbol)} ${symbol} weekend`}
+        </button>
       </div>
-      <ol className="steps">
-        {STEPS.map((t, i) => <li key={t} data-done={i < step} data-now={i === step && (s.market !== null || s.busy)}>{t}</li>)}
-      </ol>
-      <button className="primary" disabled={s.busy || !deps.wallet} onClick={go}>{s.market ? "Run another weekend" : `Run a ${symbol} weekend`}</button>
-      {!deps.wallet && <p className="note">Connect a wallet to run it; no tokens needed. Or play a demo replay below without one.</p>}
       {s.note && <p className="note">{s.note}</p>}
       {s.market && s.info && !s.rung && !s.bought && <BuyPanel deps={deps} market={s.market} info={s.info} contracts={200} onBought={onBought} balanceNonce={s.faucetCount} />}
       {s.market && s.info && s.rung && <><Settle deps={deps} market={s.market} info={s.info} onSent={onSent} /><ProofScreen deps={deps} market={s.market} info={s.info} transferSig={s.sig} contracts={200} /></>}

@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import type { PublicKey } from "@solana/web3.js";
 import type { AppDeps } from "../lib/api";
 import type { MarketInfo } from "../lib/program";
-import { fmtPct } from "../lib/line";
-import { PayoffChart } from "./PayoffChart";
+import type { ReplayView } from "./Calculator";
 import { ProofScreen } from "./ProofScreen";
 import { Receipt, measuredFall } from "./Receipt";
 
@@ -19,22 +18,21 @@ export const DEMO_REPLAYS = [
 
 const HOLDING = 5000, CONTRACTS = 200, PREMIUM = 200 * 0.11955;
 
-function DemoReplay() {
+function DemoReplay({ onReplay }: { onReplay?: (v: ReplayView | null) => void }) {
   const [id, setId] = useState<(typeof DEMO_REPLAYS)[number]["id"]>("partial");
   const r = DEMO_REPLAYS.find((x) => x.id === id)!;
-  const fall = r.monday === null ? 0 : Math.max(0, measuredFall(r.friday, r.monday));
   return (
     <div data-testid="demo-replay">
       <p className="demo-label" data-testid="demo-label">{DEMO_LABEL}</p>
       <div className="row seg" role="group" aria-label="Demo weekend">
         {DEMO_REPLAYS.map((x) => (
-          <button key={x.id} aria-pressed={x.id === id} onClick={() => setId(x.id)}>{x.name}</button>
+          <button key={x.id} aria-pressed={x.id === id} onClick={() => {
+            setId(x.id);
+            const f = x.monday === null ? null : Math.min(0.08, Math.max(0, measuredFall(x.friday, x.monday)));
+            onReplay?.(f === null ? null : { mode: "Demo replay", title: `Demo weekend, ${x.name.toLowerCase()}`, holding: HOLDING, contracts: CONTRACTS, perContract: PREMIUM / CONTRACTS, fall: f });
+          }}>{x.name}</button>
         ))}
       </div>
-      {!r.voided && (
-        <PayoffChart holding={HOLDING} contracts={CONTRACTS} premiumTotal={PREMIUM} fall={Math.min(0.08, fall)}
-          label={`Demo: net loss at a ${fmtPct(fall)} fall with 200 contracts on $5,000`} />
-      )}
       <Receipt d={{
         kind: "demo",
         title: `Demo weekend: ${r.name.toLowerCase()}`,
@@ -62,16 +60,17 @@ function VerifiedReplay({ deps, market }: { deps: AppDeps; market: PublicKey | n
 }
 
 /** Replays anyone can run on any day: Demo (made-up prices) and Verified (a real settled market). */
-export function Replays({ deps }: { deps: AppDeps }) {
+export function Replays({ deps, onReplay }: { deps: AppDeps; onReplay?: (v: ReplayView | null) => void }) {
   const [mode, setMode] = useState<"demo" | "verified">("demo");
   return (
     <section className="card" id="replays">
       <h2>Replay a weekend</h2>
+      <p className="note">Pick a weekend and the instrument above shows it.</p>
       <div className="row seg" role="group" aria-label="Replay kind">
         <button aria-pressed={mode === "demo"} onClick={() => setMode("demo")}>Demo replay</button>
-        <button aria-pressed={mode === "verified"} onClick={() => setMode("verified")}>Verified replay</button>
+        <button aria-pressed={mode === "verified"} onClick={() => { setMode("verified"); onReplay?.(null); }}>Verified replay</button>
       </div>
-      {mode === "demo" ? <DemoReplay /> : <VerifiedReplay deps={deps} market={deps.verifiedMarket ?? null} />}
+      {mode === "demo" ? <DemoReplay onReplay={onReplay} /> : <VerifiedReplay deps={deps} market={deps.verifiedMarket ?? null} />}
     </section>
   );
 }

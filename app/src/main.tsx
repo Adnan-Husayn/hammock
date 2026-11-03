@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { ConnectionProvider, useConnection, useWallet, WalletProvider } from "@solana/wallet-adapter-react";
-import { WalletModalProvider, WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { useWalletModal, WalletModalProvider, WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import "./styles.css";
 import App from "./App";
@@ -66,6 +66,7 @@ function chainApi(conn: Connection): ChainApi {
 function Connected() {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useWallet();
+  const { setVisible } = useWalletModal();
   const deps = useMemo<AppDeps>(() => ({
     service,
     chain: chainApi(connection),
@@ -76,7 +77,7 @@ function Connected() {
     stocks,
     verifiedMarket,
   }), [connection, publicKey, signTransaction]);
-  return <App deps={deps} walletButton={<WalletMultiButton />} />;
+  return <App deps={deps} walletButton={<WalletMultiButton />} onConnectWallet={() => setVisible(true)} />;
 }
 
 createRoot(document.getElementById("root")!).render(

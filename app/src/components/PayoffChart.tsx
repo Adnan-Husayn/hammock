@@ -1,17 +1,28 @@
-import { useRef, type KeyboardEvent, type PointerEvent } from "react";
-import { DETENTS, FALL_MAX, fmtPct, lossLine, snapFall, stepFall, uncoveredLine, type LinePoint } from "../lib/line";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { DETENTS, FALL_MAX, fmtPct, lossLine, signedUsd, snapFall, stepFall, uncoveredLine, type LinePoint } from "../lib/line";
 import { fmtUsd, netLoss } from "../lib/program";
 
-const W = 640, H = 300, L = 64, R = 16, T = 18, B = 40;
+const R = 20, T = 40, B = 64;
 
 /**
  * Net loss against Monday's fall, 0% to 8%. Loss is drawn downward, so the uncovered line keeps falling.
- * The viewBox is fixed and scaled uniformly: the line never stretches.
+ * The viewBox follows the drawn width one to one, so text stays at its real size and the line never stretches.
  */
 export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, label }: {
   holding: number; contracts: number; premiumTotal: number; fall: number; onFall?: (f: number) => void; label: string;
 }) {
   const svg = useRef<SVGSVGElement>(null);
+  const [W, setW] = useState(920);
+  useEffect(() => {
+    const el = svg.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => { const w = Math.round(e.contentRect.width); if (w > 0) setW(w); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const phone = W < 560;
+  const H = phone ? 380 : 460;
+  const L = phone ? 58 : 76;
   const covered = lossLine(holding, contracts, premiumTotal);
   const bare = uncoveredLine(holding);
   const all = [...covered, ...bare].map((p) => p.loss);
@@ -20,14 +31,15 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
   const y = (loss: number) => T + ((loss - lo) / (hi - lo)) * (H - T - B);
   const path = (pts: LinePoint[]) => pts.map((p, i) => `${i ? "L" : "M"}${x(p.fall).toFixed(2)},${y(p.loss).toFixed(2)}`).join(" ");
   const here = netLoss(holding, fall, contracts, premiumTotal);
-  const ticks = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08];
+  const ticks = phone ? [0, 0.02, 0.04, 0.06, 0.08] : [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08];
   const yTicks = [0, hi / 2, hi].map((v) => Math.round(v));
+  const [l1, l5] = [covered[1].loss, covered[2].loss];
+  const flat = contracts > 0 && Math.abs(l5 - l1) < 0.01;
 
   const fromPointer = (e: PointerEvent) => {
     const r = svg.current!.getBoundingClientRect();
-    const scale = Math.min(r.width / W, r.height / H) || 1;
-    const offsetX = (r.width - W * scale) / 2;
-    const vx = (e.clientX - r.left - offsetX) / scale;
+    const scale = r.width / W || 1;
+    const vx = (e.clientX - r.left) / scale;
     onFall?.(snapFall(((vx - L) / (W - L - R)) * FALL_MAX));
   };
   const onKey = (e: KeyboardEvent) => {
@@ -37,25 +49,30 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
       onFall?.(next);
     }
   };
+  const mid = (x(DETENTS[0]) + x(DETENTS[1])) / 2;
 
   return (
     <svg
-      ref={svg} className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label} data-testid="payoff-chart"
+      ref={svg} className="chart" viewBox={`0 0 ${W} ${H}`} style={{ height: H }} role="img" aria-label={label} data-testid="payoff-chart"
       onPointerDown={onFall ? (e) => { (e.target as Element).setPointerCapture?.(e.pointerId); fromPointer(e); } : undefined}
       onPointerMove={onFall ? (e) => { if (e.buttons) fromPointer(e); } : undefined}
     >
       <rect className="band" x={x(DETENTS[0])} y={T} width={x(DETENTS[1]) - x(DETENTS[0])} height={H - T - B} />
-      <text className="band-label" x={(x(DETENTS[0]) + x(DETENTS[1])) / 2} y={T + 14} textAnchor="middle">1% to 5% band</text>
+      {DETENTS.map((d) => <line key={d} className="band-rule" x1={x(d)} x2={x(d)} y1={T} y2={H - B} />)}
+      <text className="band-label" x={mid} y={T + 22} textAnchor="middle">1% to 5% band</text>
+      <text className="detent-label" x={x(DETENTS[0]) + 6} y={H - B - (phone ? 30 : 10)}>{phone ? "Pays from 1%" : "Payout starts at 1%"}</text>
+      <text className="detent-label" x={x(DETENTS[1]) - 6} y={H - B - 10} textAnchor="end">{phone ? "Full at 5%" : "Full payout at 5%"}</text>
       {yTicks.map((v) => (
         <g key={v}>
           <line className="grid" x1={L} x2={W - R} y1={y(v)} y2={y(v)} />
-          <text className="axis" x={L - 8} y={y(v) + 4} textAnchor="end">{fmtUsd(v).replace(".00", "")}</text>
+          <text className="axis" x={L - 10} y={y(v) + 5} textAnchor="end">{signedUsd(-v).replace(".00", "")}</text>
         </g>
       ))}
-      {ticks.map((f) => <text key={f} className="axis" x={x(f)} y={H - B + 18} textAnchor="middle">{`${Math.round(f * 100)}%`}</text>)}
-      <text className="axis" x={W - R} y={H - 6} textAnchor="end">Monday fall from the Friday mark</text>
+      {ticks.map((f) => <text key={f} className="axis" x={x(f)} y={H - B + 24} textAnchor="middle">{`${Math.round(f * 100)}%`}</text>)}
+      <text className="axis axis-title" x={W - R} y={H - 10} textAnchor="end">Monday fall from the Friday mark</text>
       <path className="uncovered" d={path(bare)} data-testid="uncovered-line" />
       <path className="covered" d={path(covered)} data-testid="covered-line" />
+      {flat && <text className="flat-label" x={fall < (DETENTS[0] + DETENTS[1]) / 2 ? x(DETENTS[1]) - 8 : x(DETENTS[0]) + 8} y={y(l1) + 34} textAnchor={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "end" : "start"} data-testid="flat-label">{`flat at ${signedUsd(-l1)}`}</text>}
       <line className="marker-rule" x1={x(fall)} x2={x(fall)} y1={T} y2={H - B} />
       {onFall ? (
         <g
@@ -63,10 +80,10 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
           aria-valuemin={0} aria-valuemax={8} aria-valuenow={Number((fall * 100).toFixed(2))}
           aria-valuetext={`${fmtPct(fall)} fall, net loss ${fmtUsd(here)}`} onKeyDown={onKey}
         >
-          <circle r={22} cx={x(fall)} cy={y(here)} className="hit" />
-          <circle r={7} cx={x(fall)} cy={y(here)} className="dot" />
+          <circle r={28} cx={x(fall)} cy={y(here)} className="hit" />
+          <circle r={11} cx={x(fall)} cy={y(here)} className="dot" />
         </g>
-      ) : <circle r={6} cx={x(fall)} cy={y(here)} className="dot" />}
+      ) : <circle r={10} cx={x(fall)} cy={y(here)} className="dot" />}
     </svg>
   );
 }

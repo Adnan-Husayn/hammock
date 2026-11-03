@@ -85,3 +85,14 @@ export function snapFall(raw: number): number {
 }
 
 export const fmtPct = (f: number) => `${(f * 100).toFixed(2)}%`;
+
+/** Signed dollars: a cost or loss is shown with a minus sign. */
+export const signedUsd = (n: number) => (Math.abs(n) < 0.005 ? "$0.00" : `${n < 0 ? "-" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+/** The arithmetic as one signed line, for example "Stock loss -$150.00 + Payout $100.00 - Premium $23.91 = Net loss -$73.91". */
+export function equationLine(r: { holdingLoss: number; payout: number; premium: number; netLoss: number }) {
+  return `Stock loss ${signedUsd(-r.holdingLoss)} + Payout ${signedUsd(r.payout)} - Premium ${signedUsd(r.premium)} = Net loss ${signedUsd(-r.netLoss)}`;
+}
+
+/** "a" or "an" before a ticker read letter by letter: an NVDA, a TSLA, an SPY, an AAPL. */
+export const article = (symbol: string) => (/^[AEFHILMNORSX]/i.test(symbol) ? "an" : "a");
