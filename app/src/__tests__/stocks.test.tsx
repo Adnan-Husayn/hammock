@@ -27,7 +27,7 @@ describe("stock picker", () => {
     expect(screen.getByTestId("holding-line").textContent).toBe("Your holding: $5,000 TSLAx");
     expect((d.chain.readMarket as any).mock.calls.map((c: any[]) => c[0].toBase58())).toEqual([nvda.toBase58(), tsla.toBase58()]);
     await act(async () => fireEvent.click(within(group).getByRole("button", { name: "SPY" })));
-    await screen.findByText("No live SPY market this weekend");
+    await screen.findByText("Next SPY cover is not created yet");
     // Outside the picker, nothing names another stock.
     const rest = container.textContent!.replace(group.textContent!, "");
     expect(rest).not.toMatch(/NVDA|TSLA|AAPL/);

@@ -63,6 +63,10 @@ describe("landing", () => {
   it("has the demo holding, the closed-market line and two actions, no form", async () => {
     const { container } = render(<App deps={deps({ market: null, wallet: false })} />);
     await screen.findByTestId("state-card");
+    expect(screen.getByTestId("card-run-demo").textContent).toBe("Run a demo weekend");
+    await click(screen.getByTestId("card-run-demo"));
+    expect(screen.getByTestId("buy-flow").getAttribute("data-step")).toBe("choose");
+    await click(screen.getByRole("button", { name: "Cancel" }));
     const landing = screen.getByTestId("landing");
     expect(screen.getByTestId("market-closed").textContent).toBe("Stock market closed for 65h 30m. Token still trades.");
     expect(within(landing).getAllByRole("button").map((b) => b.textContent)).toEqual(["Run a demo weekend", "See how cover works"]);
@@ -75,6 +79,8 @@ describe("two-step buy", () => {
   it("goes Choose cover, then Review & confirm, then the card shows Cover active", async () => {
     await runDemoToActive();
     const flow = screen.getByTestId("buy-flow");
+    expect(screen.getAllByTestId("cover-card").length).toBe(1);
+    expect(screen.getByTestId("cover-card").contains(flow)).toBe(true);
     expect(flow.getAttribute("data-step")).toBe("choose");
     expect(within(flow).getByRole("heading").textContent).toBe("Choose cover");
     expect(within(flow).getByRole("group", { name: "Cover stock" })).toBeTruthy();
@@ -83,6 +89,9 @@ describe("two-step buy", () => {
     await click(screen.getByTestId("to-review"));
     expect(flow.getAttribute("data-step")).toBe("review");
     expect(within(flow).getByRole("heading").textContent).toBe("Review & confirm");
+    expect(screen.getByTestId("review-lead").textContent).toBe("At a 3% fall: -$73.91 with cover, -$150.00 without.");
+    expect(screen.getByTestId("review-cap").textContent).toBe("Payout stops at $200.00 at a 5% fall. Past 5%, your net loss grows again.");
+    expect(screen.getByTestId("review").textContent).not.toMatch(/not covered/);
     const review = screen.getByTestId("review").textContent!;
     for (const k of ["Premium", "Payout cap", "Band", "Monday mark", "Quote expiry"]) expect(review).toContain(k);
     expect(screen.getByTestId("review-premium").textContent).toMatch(/^\$23\.91/);
@@ -91,8 +100,8 @@ describe("two-step buy", () => {
     await click(screen.getByTestId("confirm-demo"));
     expect(screen.queryByTestId("buy-flow")).toBeNull();
     expect(screen.getByTestId("cover-status").textContent).toBe("Cover active");
-    expect(screen.getByTestId("compressed").textContent).toContain("Demo time, compressed");
-    expect(screen.getByTestId("sized-note").textContent).toBe("Sized for $5,000 at purchase; your token balance may differ.");
+    expect(screen.getByTestId("time-tag").textContent).toBe("Demo: the 65h 30m weekend runs in about 4 seconds");
+    expect(screen.getByTestId("sized-note").textContent).toBe("Cover stays at 200 contracts even if your token balance changes.");
   });
 });
 
@@ -116,7 +125,12 @@ describe("settlement in place", () => {
     expect(card.querySelector("[data-testid=fall-marker]")!.getAttribute("data-verified")).toBe("false");
     expect(card.querySelector("[data-testid=mark-label]")!.textContent).toBe("Monday mark (demo) 3.00%");
     expect(card.textContent).not.toMatch(/Payout starts at 1%|Full payout at 5%/);
-    expect(within(card).getByTestId("marks").textContent).toContain("Demo time, compressed");
+    expect(within(card).getByTestId("marks").textContent).toContain("Demo: the 65h 30m weekend runs in about 4 seconds");
+    expect(within(card).getByTestId("cover-status").textContent).toBe("Demo mark final");
+    expect(within(card).getByTestId("what-now").textContent).toContain("Monday mark is in. Claim the $100.00 demo payout. Demo USDC only, no real funds.");
+    const row = within(card).getByTestId("action-row");
+    expect(within(row).getByTestId("source-line").textContent).toBe("Demo result, no signed price proof");
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Claim $100.00 USDC", "Export receipt"]);
     await click(primaries[0]);
     expect(screen.getByTestId("cover-card")).toBe(card);
     expect(card.getAttribute("data-status")).toBe("Claimed");
@@ -128,14 +142,15 @@ describe("settlement in place", () => {
 
   it("settles by itself after the compressed weekend", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
     render(<App deps={deps({ market: null, wallet: false })} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     await click(screen.getByTestId("run-demo"));
     await click(screen.getByTestId("to-review"));
     await click(screen.getByTestId("confirm-demo"));
     await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
-    expect(screen.getByTestId("cover-status").textContent).toBe("Monday mark final");
-    vi.useRealTimers();
+    expect(screen.getByTestId("cover-status").textContent).toBe("Demo mark final");
+    } finally { vi.useRealTimers(); }
   });
 });
 
@@ -209,6 +224,9 @@ describe("proof marker", () => {
     await waitFor(() => expect(card.querySelector("[data-testid=fall-marker]")!.getAttribute("data-verified")).toBe("true"));
     expect(within(card).getByTestId("holding-line").textContent).toBe("Your holding: $5,000 NVDAx");
     const claim = await within(card).findByRole("button", { name: "Claim $50.00 USDC" });
+    expect(within(card).getByTestId("cover-status").textContent).toBe("Monday mark final");
+    expect(within(card).getByTestId("source-line").textContent).toBe("Verified Pyth result, receipt available");
+    expect(within(card).getByTestId("source-line").classList.contains("is-verified")).toBe(true);
     closed = true;
     await click(claim);
     await waitFor(() => expect(card.getAttribute("data-status")).toBe("Claimed"));

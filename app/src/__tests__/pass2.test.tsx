@@ -37,7 +37,7 @@ describe("page", () => {
     const { container } = render(<App deps={deps({ market: market() })} />);
     await screen.findByTestId("state-card");
     expect(screen.getByText(PRODUCT_NAME)).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Keep the token. Know your loss on a 1% to 5% Monday fall.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Know your NVDAx loss on a 1% to 5% Monday fall.");
     expect(screen.getByText("Solana devnet, demo tokens")).toBeTruthy();
     expect(container.textContent).not.toMatch(/;|gasless|30 seconds/i);
     expect(container.textContent).not.toMatch(OPEN);
@@ -52,13 +52,15 @@ describe("page", () => {
     expect(css).toMatch(/\.wallet-adapter-button-trigger[^{]*\{[^}]*background:transparent/);
   });
 
-  it("states the market once with a link that focuses the replay pills", async () => {
-    render(<App deps={deps({ market: null })} />);
+  it("states the market once and shows four replay pills under it, no wallet needed", async () => {
+    render(<App deps={deps({ market: null, wallet: false })} />);
     const card = await screen.findByTestId("state-card");
-    expect(card.textContent).toBe("No live NVDA market this weekend. Run a demo weekend or inspect a replay.");
-    await act(async () => fireEvent.click(screen.getByTestId("inspect-replay")));
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    expect(document.activeElement?.textContent).toBe("No payout");
+    expect(card.textContent).toBe("Next NVDA cover is not created yet. Run a demo weekend or pick a replay.");
+    expect(screen.queryByTestId("inspect-replay")).toBeNull();
+    const pills = within(screen.getByRole("group", { name: "Replays" }));
+    expect(pills.getAllByRole("button").map((b) => b.textContent)).toEqual(["No payout", "Partial fall", "Cap", "Void"]);
+    await act(async () => fireEvent.click(pills.getByRole("button", { name: "Cap" })));
+    expect(within(screen.getByTestId("replay-inline")).getByTestId("receipt-payout").textContent).toBe("200 x $1.00 = $200.00");
   });
 
   it("keeps the stock pills and the devnet pill apart in the header", async () => {
