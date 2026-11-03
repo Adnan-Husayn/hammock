@@ -7,7 +7,7 @@ import { CoverCard } from "./components/CoverCard";
 import { Ledger } from "./components/Ledger";
 import { PriceTracks } from "./components/PriceTracks";
 import { RealCover } from "./components/RealCover";
-import { Replays } from "./components/Replays";
+import { DEMO_REPLAYS, DemoReceipt, Replays, type DemoId } from "./components/Replays";
 import { QuickWeekend, Sandbox } from "./components/Sandbox";
 import { StateTag, type Certainty } from "./components/StateTag";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -15,7 +15,7 @@ import { PRODUCT_NAME } from "./brand";
 import { enabledStocks } from "./lib/markets";
 import { SAMPLE_PREMIUM } from "./lib/line";
 import {
-  DEMO_FRIDAY, DEMO_HOLDING, DEMO_MONDAY, DEMO_PREMIUM_PER_CONTRACT, DEMO_TIME_LABEL, demoWeekend, fmtEtDay, nextWeekend,
+  DEMO_FRIDAY, DEMO_HOLDING, DEMO_MONDAY, DEMO_PREMIUM_PER_CONTRACT, DEMO_WEEKEND_MS, demoWeekend, fmtEtDay, nextWeekend,
   payoutFor, settledStatus, type CoverRecord,
 } from "./lib/cover";
 import { loadLedger, saveLedger, upsert } from "./lib/ledger";
@@ -36,7 +36,7 @@ export function phaseOf(m: MarketInfo | null, nowMs: number): Phase {
 }
 
 const COPY: Record<Phase, [string, string]> = {
-  none: ["No live {sym} market this weekend", "Run a demo weekend or {replay}."],
+  none: ["Next {sym} cover is not created yet", "Run a demo weekend or pick a replay."],
   created: ["Friday mark not in yet", "Buying starts once it is final."],
   buying: ["Buying now", ""],
   locked: ["Buying has ended", "The Monday morning mark decides the payout."],
@@ -47,8 +47,7 @@ const COPY: Record<Phase, [string, string]> = {
 /** How settled the market is, shown in the status line. */
 const CERTAINTY: Record<Phase, Certainty | null> = { none: null, created: "observed", buying: "estimate", locked: "estimate", settled: "final", voided: "final" };
 
-/** Seconds a compressed demo weekend takes from Cover active to the Monday mark. */
-export const DEMO_WEEKEND_MS = 4000;
+export { DEMO_WEEKEND_MS };
 
 type Flow = { kind: "demo" | "real"; step: BuyStep };
 
@@ -71,6 +70,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
   const [realNonce, setRealNonce] = useState(0);
   const [howOpen, setHowOpen] = useState(false);
   const [sandbox, setSandbox] = useState(false);
+  const [replay, setReplay] = useState<DemoId | null>(null);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -113,7 +113,8 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
     timer.current = window.setTimeout(() => settleDemo(c), DEMO_WEEKEND_MS);
   };
 
-  const startDemo = () => { setFlow({ kind: "demo", step: "choose" }); };
+  const toCard = () => setTimeout(() => document.getElementById("cover-card")?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 0);
+  const startDemo = () => { setFlow({ kind: "demo", step: "choose" }); toCard(); };
   const startReal = () => (deps.wallet ? setFlow({ kind: "real", step: "choose" }) : onConnectWallet?.());
   const coverNext = () => (market && phase === "buying" && deps.wallet && !real ? startReal() : startDemo());
   const showHow = () => {
@@ -131,14 +132,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
     <p className="status" data-testid="state-card" data-state={phase}>
       {certainty && <><StateTag kind={certainty} /> </>}
       <strong>{phase === "none" ? title : `${symbol}: ${title}`}</strong>.
-      {text && <> {text.includes("{replay}") ? <>{text.split("{replay}")[0]}<button className="link" data-testid="inspect-replay" onClick={() => {
-        setHowOpen(true);
-        setTimeout(() => {
-          const first = document.querySelector<HTMLButtonElement>("[data-replay-pill]");
-          first?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-          first?.focus();
-        }, 0);
-      }}>inspect a replay</button>{text.split("{replay}")[1]}</> : text}</>}
+      {text && <> {text}</>}
       {phase === "buying" && !real && !flow && <> <button className="link" data-testid="buy-real" onClick={startReal}>Choose devnet cover</button></>}
     </p>
   ) : null;
@@ -150,12 +144,13 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
   };
   const holdingLabel = deps.wallet ? "Your holding" : "Demo holding";
   const onLanding = !flow && !demo && !real;
+  const headline = `Know your ${symbol}x loss on a 1% to 5% Monday fall.`;
 
   const demoActions = demo?.status === "Monday mark final"
     ? <button className="primary" data-testid="claim" onClick={() => record({ ...demo, status: "Claimed" })}>Claim {fmtUsd(payoutFor(demo))} USDC</button>
     : undefined;
   const compressed = demo?.status === "Cover active" ? (
-    <p className="compressed" data-testid="compressed"><span className="badge">{DEMO_TIME_LABEL}</span> Friday mark in. The Monday mark lands shortly.{" "}
+    <p className="compressed" data-testid="compressed">Friday mark in. The demo clock is running.{" "}
       <button className="link" data-testid="skip-monday" onClick={() => settleDemo(demo)}>Go to the Monday mark</button></p>
   ) : undefined;
 
@@ -176,7 +171,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
 
       {onLanding && (
         <section className="landing" data-testid="landing">
-          <h1 className="hero">Keep the token. Know your loss on a 1% to 5% Monday fall.</h1>
+          <h1 className="hero">{headline}</h1>
           <p className="lead" data-testid="market-closed">Stock market closed for 65h 30m. Token still trades.</p>
           <div className="row actions">
             <button className="primary" data-testid="run-demo" onClick={startDemo}>Run a demo weekend</button>
@@ -184,10 +179,27 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
           </div>
         </section>
       )}
-      {!onLanding && <h1 className="hero hero-small">Keep the token. Know your loss on a 1% to 5% Monday fall.</h1>}
+      {!onLanding && <h1 className="hero hero-small">{headline}</h1>}
       {status && <div className="status-line">{status}</div>}
+      <div className="row replay-pills" role="group" aria-label="Replays" data-testid="replay-pills">
+        <span className="group-label">Replays:</span>
+        {DEMO_REPLAYS.map((x) => (
+          <button key={x.id} className={`pill${replay === x.id ? " is-active" : ""}`} data-replay-pill aria-pressed={replay === x.id}
+            onClick={() => setReplay(replay === x.id ? null : x.id)}>{x.name}</button>
+        ))}
+      </div>
+      {replay && <div className="replay-inline" data-testid="replay-inline"><p className="demo-label">Demo prices, not Pyth, not a settlement</p><DemoReceipt id={replay} /></div>}
 
-      {flow && (
+
+      {market && info && (
+        <RealCover key={`${market.toBase58()}-${realNonce}`} deps={deps} market={market} info={info} symbol={symbol}
+          buyBy={phase === "buying" ? fmtEtDay(Number(info.buyingCloseTs) * 1000) : undefined} onRecord={setReal} />
+      )}
+      {demo && !(flow?.kind === "demo") && (
+        <CoverCard key={demo.id} c={demo} holdingLabel="Demo holding" actions={demoActions} compressed={compressed} />
+      )}
+      {(onLanding || flow) && <CoverCard key="preview" c={preview} preview holdingLabel={holdingLabel} onRunDemo={startDemo}
+        body={flow ? (
         <BuyFlow step={flow.step} kind={flow.kind} stocks={stocks} symbol={symbol} onSymbol={pickStock}
           holding={holding} onHolding={setHolding} contracts={contracts} onContracts={setCustom}
           premiumPerContract={perContract} sample={flow.kind === "demo" || premium === undefined}
@@ -198,16 +210,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
             : market && info ? <BuyPanel deps={deps} market={market} info={info} contracts={contracts} embedded onQuote={setPremium}
                 onBought={() => { setFlow(null); setRealNonce((n) => n + 1); }} /> : <p className="note">No devnet market to buy from.</p>}
           onNext={() => setFlow({ ...flow, step: "review" })} onBack={() => setFlow({ ...flow, step: "choose" })} onCancel={() => setFlow(null)} />
-      )}
-
-      {market && info && (
-        <RealCover key={`${market.toBase58()}-${realNonce}`} deps={deps} market={market} info={info} symbol={symbol}
-          buyBy={phase === "buying" ? fmtEtDay(Number(info.buyingCloseTs) * 1000) : undefined} onRecord={setReal} />
-      )}
-      {demo && !(flow?.kind === "demo") && (
-        <CoverCard key={demo.id} c={demo} holdingLabel="Demo holding" actions={demoActions} compressed={compressed} />
-      )}
-      {(onLanding || flow) && <CoverCard key="preview" c={preview} preview holdingLabel={holdingLabel} />}
+        ) : undefined} />}
 
       <Ledger list={ledger} nextFriday={weekend.friday} buyBy={buyBy} onCoverNext={coverNext} />
 
