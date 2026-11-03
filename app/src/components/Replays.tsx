@@ -20,6 +20,22 @@ const CONTRACTS = 200;
 
 export type DemoId = (typeof DEMO_REPLAYS)[number]["id"];
 
+/** The receipt for one demo replay. */
+export function DemoReceipt({ id }: { id: DemoId }) {
+  const r = DEMO_REPLAYS.find((x) => x.id === id)!;
+  return (
+    <Receipt d={{
+      kind: "demo",
+      title: `Demo weekend: ${r.name.toLowerCase()}`,
+      friday: r.friday,
+      monday: r.monday,
+      voided: r.voided,
+      voidReason: "Demo void: no Monday mark met the rules, so the market voids and each buyer can take a refund of the premium paid.",
+      contracts: CONTRACTS,
+    }} />
+  );
+}
+
 function DemoReplay({ selected, onSelect }: { selected?: DemoId; onSelect?: (id: DemoId) => void }) {
   const [own, setOwn] = useState<DemoId>("partial");
   const id = selected ?? own;

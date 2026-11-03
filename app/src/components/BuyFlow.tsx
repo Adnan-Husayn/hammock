@@ -24,7 +24,7 @@ export function BuyFlow({ step, kind, stocks, symbol, onSymbol, holding, onHoldi
   const suggested = suggestedContracts(holding);
   const premium = contracts * premiumPerContract;
   return (
-    <section className="card buy-flow" data-testid="buy-flow" data-step={step} aria-label={kind === "demo" ? "Demo cover" : "Devnet cover"}>
+    <div className="buy-flow" data-testid="buy-flow" data-step={step} aria-label={kind === "demo" ? "Demo cover" : "Devnet cover"}>
       <ol className="buy-steps">
         {(["choose", "review"] as const).map((s, i) => (
           <li key={s} aria-current={s === step ? "step" : undefined}>{i + 1}. {STEP_NAMES[s]}</li>
@@ -32,7 +32,7 @@ export function BuyFlow({ step, kind, stocks, symbol, onSymbol, holding, onHoldi
       </ol>
       {step === "choose" ? (
         <>
-          <h2>{STEP_NAMES.choose}</h2>
+          <h3>{STEP_NAMES.choose}</h3>
           <div className="row picker" role="group" aria-label="Cover stock">
             {stocks.map((s) => (
               <button key={s.symbol} className={`pill${s.symbol === symbol ? " is-active" : ""}`} aria-pressed={s.symbol === symbol} onClick={() => onSymbol(s.symbol)}>{s.symbol}</button>
@@ -57,12 +57,13 @@ export function BuyFlow({ step, kind, stocks, symbol, onSymbol, holding, onHoldi
         </>
       ) : (
         <>
-          <h2>{STEP_NAMES.review}</h2>
+          <h3>{STEP_NAMES.review}</h3>
+          <p className="review-lead num" data-testid="review-lead">At a 3% fall: {signedUsd(-readout(holding, 0.03, contracts, premiumPerContract).netLoss)} with cover, {signedUsd(-readout(holding, 0.03, contracts, premiumPerContract).holdingLoss)} without.</p>
           <dl className="review" data-testid="review">
             <dt>Cover</dt><dd>{contracts} contracts on {fmtUsd(holding).replace(/\.00$/, "")} of {token}</dd>
             <dt>Premium</dt><dd className="num" data-testid="review-premium">{fmtUsd(premium)} <span className="note">({premiumPerContract.toFixed(5)} per contract{sample ? ", demo" : ""})</span></dd>
-            <dt>Payout cap</dt><dd className="num">{fmtUsd(contracts)}, reached at a 5% fall</dd>
-            <dt>Band</dt><dd>Nothing at a fall of 1% or less. Rises to $1.00 per contract at 5%. Losses past 5% are not covered.</dd>
+            <dt>Payout cap</dt><dd className="num" data-testid="review-cap">Payout stops at {fmtUsd(contracts)} at a 5% fall. Past 5%, your net loss grows again.</dd>
+            <dt>Band</dt><dd>Nothing at a fall of 1% or less. Rises to $1.00 per contract at 5%.</dd>
             <dt>Monday mark</dt><dd>{fmtEtDay(mondayAt)}</dd>
             <dt>Quote expiry</dt><dd>{expiry}</dd>
           </dl>
@@ -82,6 +83,6 @@ export function BuyFlow({ step, kind, stocks, symbol, onSymbol, holding, onHoldi
           </div>
         </>
       )}
-    </section>
+    </div>
   );
 }

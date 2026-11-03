@@ -4,7 +4,7 @@ import { tokenName } from "../lib/markets";
 import { bandSlope, fmtFall, fmtPct, PARTIAL_COVER_LABEL, signedUsd } from "../lib/line";
 import { PRODUCT_NAME } from "../brand";
 import {
-  coverFall, coverNumbers, DEMO_LABEL, DEMO_TIME_LABEL, fmtEtDay, measured, receiptText, SIZED_NOTE, sumLine, WEEKEND_NOTE, whatNow, type CoverRecord,
+  coverFall, coverNumbers, DEMO_LABEL, DEMO_TIME_LABEL, fmtEtDay, measured, receiptText, SIZED_NOTE, sourceLine, statusLabel, sumLine, WEEKEND_NOTE, whatNow, type CoverRecord,
 } from "../lib/cover";
 import { PayoffChart } from "./PayoffChart";
 
@@ -29,7 +29,7 @@ export function exportReceipt(c: CoverRecord) {
  * The cover card: a position record. Every field is a fact. The same card goes from preview to
  * Cover active to Monday mark final to Claimed in place; only the middle and the button change.
  */
-export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPrice, buyBy, compressed, onExport = exportReceipt }: {
+export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPrice, buyBy, compressed, body, onRunDemo, onExport = exportReceipt }: {
   c: CoverRecord;
   /** Before any purchase: a sample, labelled as such, with no status. */
   preview?: boolean;
@@ -41,6 +41,10 @@ export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPri
   /** Demo progress line while the demo weekend runs. */
   compressed?: ReactNode;
   onExport?: (c: CoverRecord) => void;
+  /** Replaces the preview body: the two buy steps happen inside this card. */
+  body?: ReactNode;
+  /** Shown on the preview's "What happens now?" row. */
+  onRunDemo?: () => void;
 }) {
   const token = tokenName(c.symbol);
   const [previewFall, setPreviewFall] = useState(0.03);
@@ -53,8 +57,18 @@ export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPri
   const slope = bandSlope(c.holding, c.contracts);
   const estimateFall = !settled && !voided && weekendPrice != null && c.fridayPrice ? Math.max(0, (c.fridayPrice - weekendPrice) / c.fridayPrice) : null;
 
+  const actionRow = (
+    <div className="card-actions" data-testid="action-row">
+      {settled && actions && <p className={`source-line${c.verified ? " is-verified" : ""}`} data-testid="source-line">{sourceLine(c)}</p>}
+      <div className="action-buttons">
+        {actions}
+        <button className="quiet" data-testid="export-receipt" onClick={() => onExport(c)}>Export receipt</button>
+      </div>
+    </div>
+  );
+
   return (
-    <section className={`card cover-card cover-${c.kind}`} data-testid="cover-card" data-status={preview ? "preview" : c.status}>
+    <section id="cover-card" className={`card cover-card cover-${c.kind}`} data-testid="cover-card" data-status={preview ? "preview" : c.status}>
       <div className="card-head">
         <div>
           <h2 className="cover-title">{token} weekend cover</h2>
@@ -62,7 +76,7 @@ export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPri
         </div>
         {preview
           ? <span className="status-word status-preview" data-testid="cover-status">Preview</span>
-          : <span className={`status-word status-${c.status.split(/[ ,]/)[0].toLowerCase()}`} data-testid="cover-status">{c.status}</span>}
+          : <span className={`status-word status-${c.status.split(/[ ,]/)[0].toLowerCase()}`} data-testid="cover-status">{statusLabel(c)}</span>}
       </div>
       {c.kind === "demo" && !preview && <p className="demo-label" data-testid="demo-label">{DEMO_LABEL}</p>}
       {compressed}
@@ -75,10 +89,12 @@ export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPri
       <dl className="facts facts-marks" data-testid="marks">
         <div><dt>Friday mark</dt><dd className="num">{c.fridayPrice === null ? "Not yet" : fmtUsd(c.fridayPrice)}{c.fridayAt && <span className="when">{fmtEtDay(c.fridayAt)}</span>}</dd></div>
         <div><dt>Monday mark</dt><dd className="num">{c.mondayPrice === null ? "Not yet" : fmtUsd(c.mondayPrice)}{c.mondayAt && <span className="when">{fmtEtDay(c.mondayAt)}</span>}</dd></div>
-        {c.kind === "demo" && <p className="marks-note"><span className="badge">{DEMO_TIME_LABEL}</span></p>}
+        {c.kind === "demo" && !preview && <p className="marks-note"><span className="badge" data-testid="time-tag">{DEMO_TIME_LABEL}</span></p>}
       </dl>
 
-      <p className="what-now" data-testid="what-now"><span className="micro">What happens now?</span> {preview ? "Nothing is bought. Run a demo weekend to see the whole cycle." : whatNow(c, { buyBy })}</p>
+      {body ? <div className="card-body" data-testid="card-body">{body}</div> : <>
+      <p className="what-now" data-testid="what-now"><span className="micro">What happens now?</span> {preview ? "Nothing is bought. Run a demo weekend to see the whole cycle." : whatNow(c, { buyBy })}
+        {preview && onRunDemo && <> <button className="quiet inline-run" data-testid="card-run-demo" onClick={onRunDemo}>Run a demo weekend</button></>}</p>
 
       {voided ? (
         <p className="void-line" data-testid="void-line">Void: no Monday mark, so there is no fall to measure. {c.refunded ? `Refunded: premium ${fmtUsd(c.premium)}.` : `Premium ${fmtUsd(c.premium)} can be refunded.`}</p>
@@ -91,6 +107,7 @@ export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPri
               <span className="compare fig" data-testid="uncovered">without cover {signedUsd(-r.holdingLoss)}</span>
             </p>
           </div>
+          {settled && actionRow}
           {settled && (
             <dl className="settled-lines" data-testid="settled-lines">
               <div><dt>Fall</dt><dd className="num">{m !== null && m < 0 ? `${fmtFall(-m)} rise` : fmtFall(fall)}</dd></div>
@@ -114,14 +131,14 @@ export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPri
         </>
       )}
 
-      {!preview && <p className="note" data-testid="sized-note">{SIZED_NOTE(c.holding)}</p>}
-      {actions && <div className="card-actions">{actions}</div>}
-      {!preview && (
+      {!preview && <p className="note" data-testid="sized-note">{SIZED_NOTE(c.contracts)}</p>}
+      {!settled && !preview && actionRow}
+      {proof && !preview && (
         <div className="card-foot">
-          {proof && <button className={`link proof-link${c.verified ? " is-verified" : ""}`} aria-expanded={showProof} onClick={() => setShowProof((v) => !v)}>{showProof ? "Hide the proof" : "See the proof"}</button>}
-          <button className="quiet" data-testid="export-receipt" onClick={() => onExport(c)}>Export receipt</button>
+          <button className={`link proof-link${c.verified ? " is-verified" : ""}`} aria-expanded={showProof} onClick={() => setShowProof((v) => !v)}>{showProof ? "Hide the proof" : "See the proof"}</button>
         </div>
       )}
+      </>}
       {showProof && proof && <div className="proof" data-testid="proof">{proof}</div>}
     </section>
   );

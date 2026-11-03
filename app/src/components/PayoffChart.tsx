@@ -35,7 +35,7 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
   }, []);
   const phone = W < 560;
   // Desktop: as tall as the first screen allows, so the whole chart fits without scrolling.
-  const H = phone ? 380 : Math.max(260, Math.min(460, room));
+  const H = phone ? 380 : W >= 860 ? Math.max(400, Math.min(520, room)) : Math.max(260, Math.min(460, room));
   const L = phone ? 58 : 76;
   const covered = lossLine(holding, contracts, premiumTotal);
   const bare = uncoveredLine(holding);
