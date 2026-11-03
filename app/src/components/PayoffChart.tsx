@@ -3,6 +3,8 @@ import { DETENTS, FALL_MAX, fmtPct, lossLine, signedUsd, snapFall, stepFall, unc
 import { fmtUsd, netLoss } from "../lib/program";
 
 const R = 20, T = 24, B = 64;
+/** Phone x-axis keeps the band edges. */
+export const PHONE_TICKS = [0, 0.01, 0.03, 0.05, 0.08];
 
 /**
  * Net loss against Monday's fall, 0% to 8%. Loss is drawn downward, so the uncovered line keeps falling.
@@ -37,7 +39,7 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
   const y = (loss: number) => T + ((loss - lo) / (hi - lo)) * (H - T - B);
   const path = (pts: LinePoint[]) => pts.map((p, i) => `${i ? "L" : "M"}${x(p.fall).toFixed(2)},${y(p.loss).toFixed(2)}`).join(" ");
   const here = netLoss(holding, fall, contracts, premiumTotal);
-  const ticks = phone ? [0, 0.02, 0.04, 0.06, 0.08] : [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08];
+  const ticks = phone ? PHONE_TICKS : [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08];
   const yTicks = [0, hi / 2, hi].map((v) => Math.round(v));
   const [l1, l5] = [covered[1].loss, covered[2].loss];
   const flat = contracts > 0 && Math.abs(l5 - l1) < 0.01;
@@ -65,16 +67,16 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
     >
       <rect className="band" x={x(DETENTS[0])} y={T} width={x(DETENTS[1]) - x(DETENTS[0])} height={H - T - B} />
       {DETENTS.map((d) => <line key={d} className="band-rule" x1={x(d)} x2={x(d)} y1={T} y2={H - B} />)}
-      <text className="band-label" x={mid} y={H - B - (phone ? 52 : 10)} textAnchor="middle">1% to 5% band</text>
-      <text className="detent-label" x={x(DETENTS[0]) + 6} y={H - B - (phone ? 30 : 10)}>{phone ? "Pays from 1%" : "Payout starts at 1%"}</text>
-      <text className="detent-label" x={x(DETENTS[1]) - 6} y={H - B - 10} textAnchor="end">{phone ? "Full at 5%" : "Full payout at 5%"}</text>
+      <text className="band-label" x={mid} y={H - B - 10} textAnchor="middle">1% to 5% band</text>
+      {!phone && <text className="detent-label" x={x(DETENTS[0]) + 6} y={H - B - 10}>Payout starts at 1%</text>}
+      {!phone && <text className="detent-label" x={x(DETENTS[1]) - 6} y={H - B - 10} textAnchor="end">Full payout at 5%</text>}
       {yTicks.map((v) => (
         <g key={v}>
           <line className="grid" x1={L} x2={W - R} y1={y(v)} y2={y(v)} />
           <text className="axis" x={L - 10} y={y(v) + 5} textAnchor="end">{signedUsd(-v).replace(".00", "")}</text>
         </g>
       ))}
-      {ticks.map((f) => <text key={f} className="axis" x={x(f)} y={H - B + 24} textAnchor="middle">{`${Math.round(f * 100)}%`}</text>)}
+      {ticks.map((f) => <text key={f} className="axis xtick" x={x(f)} y={H - B + 24} textAnchor="middle">{`${Math.round(f * 100)}%`}</text>)}
       <text className="axis axis-title" x={W - R} y={H - 10} textAnchor="end">Monday fall from the Friday mark</text>
       <path className="uncovered" d={path(bare)} data-testid="uncovered-line" />
       <path className="covered" d={path(covered)} data-testid="covered-line" />

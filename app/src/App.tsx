@@ -11,7 +11,7 @@ import { PriceTracks } from "./components/PriceTracks";
 import { Replays } from "./components/Replays";
 import { QuickWeekend } from "./components/Sandbox";
 import { StateTag, type Certainty } from "./components/StateTag";
-import type { ReplayView } from "./components/Calculator";
+import type { ModeId } from "./components/Calculator";
 import { PRODUCT_NAME } from "./brand";
 import { enabledStocks } from "./lib/markets";
 
@@ -31,7 +31,7 @@ export function phaseOf(m: MarketInfo | null, nowMs: number): Phase {
 }
 
 const COPY: Record<Phase, [string, string]> = {
-  none: ["No {sym} market this weekend", "The next one appears before the Friday afternoon mark."],
+  none: ["No live {sym} market this weekend", "Try a demo replay or run a demo weekend."],
   created: ["Waiting for the Friday afternoon mark", "Buying starts once it is final."],
   buying: ["Buying now", ""],
   locked: ["Locked", "Buying has ended. The payout is fixed at the Monday morning mark."],
@@ -48,7 +48,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
   const [contracts, setContracts] = useState(200);
   const [premium, setPremium] = useState<number | undefined>();
   const [sandbox, setSandbox] = useState(false);
-  const [replay, setReplay] = useState<ReplayView | null>(null);
+  const [mode, setMode] = useState<ModeId>("calc");
   const stocks = deps.stocks?.length ? deps.stocks : enabledStocks();
   const [symbol, setSymbol] = useState(stocks[0].symbol);
   const market = deps.realMarkets ? deps.realMarkets[symbol] ?? null : deps.realMarket;
@@ -65,22 +65,21 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
   const onQuote = useCallback((p: number) => setPremium(p), []);
   const [sig, setSig] = useState<string | null>(null);
   useEffect(() => setSig(null), [market]);
-  const showReplay = (v: ReplayView | null) => {
-    setReplay(v);
-    if (v) setTimeout(() => document.getElementById("instrument")?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 0);
+  const fromReceipts = (m: ModeId) => {
+    setMode(m);
+    setTimeout(() => document.getElementById("instrument")?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 0);
   };
   const phase = phaseOf(info, (deps.now ?? Date.now)());
   const [title, copy] = COPY[phase].map((t) => t.replace("{sym}", symbol));
   const text = phase === "buying" && info ? `Buy cover until ${fmtEt(info.buyingCloseTs)} ET.` : copy;
   const certainty = CERTAINTY[phase];
-  const verified = deps.verifiedMarket ? "Last verified settlement available in replays." : "Demo replays available below.";
+  const stateText = `${phase === "none" ? title : `${symbol}: ${title}`}.${text ? ` ${text}` : ""}`;
 
   const status = loaded ? (
     <p className="status" data-testid="state-card" data-state={phase}>
       {certainty && <><StateTag kind={certainty} /> </>}
       <strong>{phase === "none" ? title : `${symbol}: ${title}`}</strong>.
       {text && <> {text}</>}
-      {" "}<a href="#replays">{verified}</a>
     </p>
   ) : null;
 
@@ -90,7 +89,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
         <span className="brand">{PRODUCT_NAME}</span>
         <div className="row picker" role="group" aria-label="Stock">
           {stocks.map((s) => (
-            <button key={s.symbol} className="pill" aria-pressed={s.symbol === symbol} onClick={() => { setSymbol(s.symbol); setReplay(null); }}>
+            <button key={s.symbol} className="pill" aria-pressed={s.symbol === symbol} onClick={() => { setSymbol(s.symbol); setMode("calc"); }}>
               {s.symbol}
             </button>
           ))}
@@ -98,19 +97,20 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
         </div>
         <div className="wallet-slot">{walletButton}</div>
       </header>
-      <h1 className="hero">Hold your stock token through the weekend without carrying the whole fall.</h1>
-      <p className="lead">If the Monday morning Pyth price is more than 1% below Friday afternoon's, you get paid in USDC, up to the full payout at a 5% fall.</p>
-      <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} />
+      <h1 className="hero">Keep the token. Know your loss on a 1% to 5% Monday fall.</h1>
+      <p className="lead">If the Monday Pyth mark is more than 1% below Friday's, you are paid in USDC, rising to the full payout at a 5% fall.</p>
+      <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} state={loaded ? stateText : undefined} />
       <div id="instrument">
         <Calculator symbol={symbol} premiumPerContract={premium} onContracts={setContracts} status={status}
-          live={!!info && phase !== "none"} replay={replay} onExitReplay={() => setReplay(null)} />
+          live={!!info && phase !== "none"} modeId={mode} onMode={setMode}
+          verifiedAvailable={!!deps.verifiedMarket} onVerified={() => document.getElementById("replays")?.scrollIntoView?.({ behavior: "smooth" })} />
       </div>
       {info && <section className="card"><PriceTracks deps={deps} info={info} symbol={symbol} /></section>}
       {market && info && phase === "buying" && <BuyPanel deps={deps} market={market} info={info} contracts={contracts} onQuote={onQuote} />}
       {market && info && phase === "locked" && <LockedView deps={deps} market={market} info={info} />}
       {market && info && (phase === "settled" || phase === "voided") && <Settle deps={deps} market={market} info={info} onSent={setSig} />}
       {market && info && (phase === "settled" || phase === "voided") && <ProofScreen deps={deps} market={market} info={info} transferSig={sig} />}
-      <Replays deps={deps} onReplay={showReplay} />
+      <Replays deps={deps} selected={mode === "calc" ? undefined : mode} onSelect={fromReceipts} />
       {sandbox ? <Sandbox key={symbol} deps={deps} symbol={symbol} /> : (
         <p className="note"><button className="link" onClick={() => setSandbox(true)}>Sandbox with step-by-step controls</button></p>
       )}

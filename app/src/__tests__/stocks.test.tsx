@@ -22,14 +22,14 @@ describe("stock picker", () => {
     const group = screen.getByRole("group", { name: "Stock" });
     expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["NVDA", "TSLA", "SPY", "AAPL"]);
     await screen.findByText("NVDA: Buying now");
-    expect(screen.getByText("What cover does for your NVDAx")).toBeTruthy();
+    expect(screen.getByText("Your cover at a 3.00% fall")).toBeTruthy();
     await act(async () => fireEvent.click(within(group).getByRole("button", { name: "TSLA" })));
     await screen.findByText("TSLA: Buying now");
-    expect(screen.getByText("What cover does for your TSLAx")).toBeTruthy();
-    expect(screen.getByText("TSLA fall by Monday (%)")).toBeTruthy();
+    expect(screen.getByText("TSLAx holding (USD)", { exact: false })).toBeTruthy();
+    expect(screen.getByText("TSLA fall by Monday", { exact: false })).toBeTruthy();
     expect((d.chain.readMarket as any).mock.calls.map((c: any[]) => c[0].toBase58())).toEqual([nvda.toBase58(), tsla.toBase58()]);
     await act(async () => fireEvent.click(within(group).getByRole("button", { name: "SPY" })));
-    await screen.findByText("No SPY market this weekend");
+    await screen.findByText("No live SPY market this weekend");
     // Outside the picker, nothing names another stock.
     const rest = container.textContent!.replace(group.textContent!, "");
     expect(rest).not.toMatch(/NVDA|TSLA|AAPL/);

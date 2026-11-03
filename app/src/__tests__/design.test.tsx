@@ -60,7 +60,7 @@ describe("marker stepping", () => {
     for (let i = 0; i < 8; i++) fireEvent.keyDown(handle, { key: "ArrowRight" });
     expect(handle.getAttribute("aria-valuenow")).toBe("5");
     fireEvent.keyDown(handle, { key: "ArrowRight" });
-    expect(screen.getByTestId("net-loss").textContent).toBe("$86.50"); // 5.25%: 262.50 - 200 + 24
+    expect(screen.getByTestId("net-loss").textContent).toBe("-$86.50"); // 5.25%: 262.50 - 200 + 24
   });
 });
 
@@ -72,7 +72,7 @@ describe("cover size", () => {
     expect(screen.getByTestId("cover-note").textContent).toMatch(/flat/);
     fireEvent.change(input, { target: { value: "120" } });
     expect(screen.getByTestId("cover-note").textContent).toBe(PARTIAL_COVER_LABEL);
-    expect(screen.getByText(/sample/i, { selector: "dt" })).toBeTruthy();
+    expect(screen.getByTestId("premium-note").textContent).toMatch(/sample/i);
   });
 });
 
