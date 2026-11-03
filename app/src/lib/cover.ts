@@ -36,8 +36,10 @@ export const DEMO_FRIDAY = 180;
 export const DEMO_MONDAY = 174.6;
 export const DEMO_PREMIUM_PER_CONTRACT = 0.11955;
 export const DEMO_LABEL = "Demo prices, not Pyth, not a settlement";
-export const DEMO_TIME_LABEL = "Demo time, compressed";
-export const SIZED_NOTE = (holding: number) => `Sized for ${fmtUsd(holding).replace(/\.00$/, "")} at purchase; your token balance may differ.`;
+/** How long a demo weekend takes from Cover active to the Monday mark. */
+export const DEMO_WEEKEND_MS = 4000;
+export const DEMO_TIME_LABEL = `Demo: the 65h 30m weekend runs in about ${Math.round(DEMO_WEEKEND_MS / 1000)} seconds`;
+export const SIZED_NOTE = (contracts: number) => `Cover stays at ${contracts} contracts even if your token balance changes.`;
 export const WEEKEND_NOTE = (token: string) => `Weekend ${token}, estimate. Does not decide the payout.`;
 export const OUTCOME_FALLS = [0, 0.03, 0.08] as const;
 
@@ -69,6 +71,13 @@ export function sumLine(r: { holdingLoss: number; payout: number; premium: numbe
 }
 
 /** The status a settled demo reaches before any claim. */
+/** The status as shown. A demo never claims a Monday mark: it reads "Demo mark final". */
+export const statusLabel = (c: Pick<CoverRecord, "kind" | "status">) => (c.kind === "demo" && c.status === "Monday mark final" ? "Demo mark final" : c.status);
+
+/** One line above the claim button saying where the result comes from. */
+export const sourceLine = (c: Pick<CoverRecord, "kind" | "verified">) =>
+  c.kind === "demo" ? "Demo result, no signed price proof" : c.verified ? "Verified Pyth result, receipt available" : "Result read from chain, signed proof not matched yet";
+
 export const settledStatus = (payout: number): CoverStatus => (payout >= 0.005 ? "Monday mark final" : "Expired, no payout");
 
 /** One line answering "What happens now?". */
@@ -78,10 +87,10 @@ export function whatNow(c: CoverRecord, extra: { buyBy?: string } = {}): string 
   switch (c.status) {
     case "Cover active":
       return demo
-        ? `The Monday 09:30 ET mark decides the payout. ${DEMO_TIME_LABEL}: it lands in a few seconds.`
+        ? "The Monday 09:30 ET mark decides the payout. It lands in a few seconds."
         : `${extra.buyBy ? `Buying ends ${extra.buyBy}. ` : ""}The Monday 09:30 ET mark decides the payout.`;
     case "Monday mark final":
-      return demo ? `Claim the demo payout of ${fmtUsd(payout)}. No tokens move.` : `Claim ${fmtUsd(payout)} USDC to your wallet.`;
+      return demo ? `Monday mark is in. Claim the ${fmtUsd(payout)} demo payout. Demo USDC only, no real funds.` : `Claim ${fmtUsd(payout)} USDC to your wallet.`;
     case "Expired, no payout":
       return "The fall was 1% or less, so nothing is due. The premium is spent.";
     case "Claimed":
