@@ -85,7 +85,7 @@ const STEPS = ["Demo tokens", "Friday mark", "Buy 200 contracts", "Monday mark",
  * "Test a full weekend": one press funds the wallet and starts a gap-mode market, the buy is one signature,
  * the Monday bell rings by itself after the buy, and the claim is the last signature. Fees are paid for you.
  */
-export function QuickWeekend({ deps, symbol, onConnect, state }: { deps: AppDeps; symbol: string; onConnect?: () => void; state?: string }) {
+export function QuickWeekend({ deps, symbol, onConnect }: { deps: AppDeps; symbol: string; onConnect?: () => void }) {
   const s = useSandbox(deps, symbol);
   const [step, setStep] = useState(0);
   const go = () => s.run(async () => {
@@ -111,7 +111,6 @@ export function QuickWeekend({ deps, symbol, onConnect, state }: { deps: AppDeps
         <div className="strip-text">
           <h2>Run a demo weekend on devnet</h2>
           <p className="note">Demo tokens and network fees are covered. You need a wallet, not real funds.</p>
-          {state && <p className="strip-state" data-testid="strip-state">{state}</p>}
         </div>
         <ol className="steps">
           {STEPS.map((t, i) => <li key={t} data-done={i < step} data-now={i === step && (s.market !== null || s.busy)}>{t}</li>)}

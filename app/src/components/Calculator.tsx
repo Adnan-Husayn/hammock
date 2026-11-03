@@ -62,7 +62,7 @@ export function Calculator({ symbol, premiumPerContract, onContracts, status, li
         <h2>Your cover at a {fmtPct(fall)} fall</h2>
         <div className="row modes" role="group" aria-label="Instrument mode">
           <button className="pill" aria-pressed={modeId === "calc"} onClick={() => pick("calc")}>Calculator</button>
-          <span className="badge">demo</span>
+          <span className="group-label" data-testid="demo-group-label">Demo replays:</span>
           {DEMO_REPLAYS.map((x) => (
             <button key={x.id} className="pill" aria-pressed={modeId === x.id} onClick={() => pick(x.id)}>{x.name}</button>
           ))}

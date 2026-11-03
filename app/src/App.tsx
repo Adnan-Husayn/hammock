@@ -13,6 +13,7 @@ import { QuickWeekend } from "./components/Sandbox";
 import { StateTag, type Certainty } from "./components/StateTag";
 import type { ModeId } from "./components/Calculator";
 import { PRODUCT_NAME } from "./brand";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { enabledStocks } from "./lib/markets";
 
 /** Market buying close in New York time, for example "Sunday 17:50". */
@@ -73,7 +74,6 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
   const [title, copy] = COPY[phase].map((t) => t.replace("{sym}", symbol));
   const text = phase === "buying" && info ? `Buy cover until ${fmtEt(info.buyingCloseTs)} ET.` : copy;
   const certainty = CERTAINTY[phase];
-  const stateText = `${phase === "none" ? title : `${symbol}: ${title}`}.${text ? ` ${text}` : ""}`;
 
   const status = loaded ? (
     <p className="status" data-testid="state-card" data-state={phase}>
@@ -95,11 +95,11 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
           ))}
           <span className="badge env">Solana devnet, demo tokens</span>
         </div>
-        <div className="wallet-slot">{walletButton}</div>
+        <div className="wallet-slot"><ThemeToggle />{walletButton}</div>
       </header>
       <h1 className="hero">Keep the token. Know your loss on a 1% to 5% Monday fall.</h1>
       <p className="lead">If the Monday Pyth mark is more than 1% below Friday's, you are paid in USDC, rising to the full payout at a 5% fall.</p>
-      <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} state={loaded ? stateText : undefined} />
+      <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} />
       <div id="instrument">
         <Calculator symbol={symbol} premiumPerContract={premium} onContracts={setContracts} status={status}
           live={!!info && phase !== "none"} modeId={mode} onMode={setMode}

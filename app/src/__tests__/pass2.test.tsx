@@ -143,15 +143,57 @@ describe("pass 4", () => {
     expect(primaries[0].getAttribute("data-testid")).toBe("run-weekend");
     expect(css).toMatch(/\.wallet-adapter-button-trigger[^{]*\{[^}]*background:transparent/);
   });
-  it("puts the same market state in the run strip and the instrument", async () => {
-    render(<App deps={deps({ market: null })} />);
-    const card = await screen.findByTestId("state-card");
-    expect(screen.getByTestId("strip-state").textContent).toBe("No live NVDA market this weekend. Try a demo replay or run a demo weekend.");
-    expect(card.textContent).toBe(screen.getByTestId("strip-state").textContent);
-  });
   it("the fall field and the marker are linked", () => {
     render(<Calculator symbol="NVDA" />);
     fireEvent.keyDown(screen.getByRole("slider", { name: "Monday fall" }), { key: "PageUp" });
     expect((screen.getByTestId("fall-input") as HTMLInputElement).value).toBe("4");
+  });
+});
+
+describe("pass 5", () => {
+  it("shows the market state once, in the instrument", async () => {
+    const { container } = render(<App deps={deps({ market: null })} />);
+    const card = await screen.findByTestId("state-card");
+    expect(screen.getByTestId("instrument").contains(card)).toBe(true);
+    expect(container.textContent!.split("No live NVDA market this weekend").length - 1).toBe(1);
+    expect(screen.getByTestId("quick-weekend").textContent).not.toMatch(/No live/);
+  });
+  it("labels the demo replays as a group, not a button", () => {
+    render(<Calculator symbol="NVDA" />);
+    const label = screen.getByTestId("demo-group-label");
+    expect(label.tagName).not.toBe("BUTTON");
+    expect(label.textContent).toBe("Demo replays:");
+    expect(within(screen.getByRole("group", { name: "Instrument mode" })).queryByRole("button", { name: /demo/i })).toBeNull();
+  });
+  it("lays the signed row out as a grid on narrow screens and keeps the status line on phones", () => {
+    render(<Calculator symbol="NVDA" />);
+    expect(screen.getByTestId("arith").classList.contains("arith")).toBe(true);
+    expect(css).toMatch(/@media \(max-width:480px\) \{\s*\.arith \{ display:grid; grid-template-columns:1fr 1fr;[^}]*\}\s*\.arith \.sep \{ display:none; \}/);
+    expect(css).not.toMatch(/\.status-line \{ display:none/);
+  });
+  it("shows the certainty label with a live market", async () => {
+    render(<App deps={deps({ market: market() })} />);
+    const card = await screen.findByTestId("state-card");
+    expect(card.querySelector(".tag")?.textContent).toBe("estimate");
+  });
+  it("cycles system, light, dark and remembers the choice", async () => {
+    const m = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    document.documentElement.removeAttribute("data-theme");
+    render(<App deps={deps({ market: null })} />);
+    const b = screen.getByTestId("theme-toggle");
+    expect(b.getAttribute("data-theme-choice")).toBe("system");
+    expect(b.getAttribute("aria-label")).toMatch(/Theme: system/);
+    fireEvent.click(b);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    expect(localStorage.getItem("theme")).toBe("light");
+    fireEvent.click(b);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(localStorage.getItem("theme")).toBe("dark");
+    fireEvent.click(b);
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(localStorage.getItem("theme")).toBeNull();
+    expect(css).toMatch(/:root\[data-theme="dark"\]/);
+    vi.unstubAllGlobals();
   });
 });
