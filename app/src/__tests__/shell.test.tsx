@@ -112,8 +112,11 @@ describe("settlement in place", () => {
     const primaries = card.querySelectorAll("button.primary");
     expect(primaries.length).toBe(1);
     expect(primaries[0].textContent).toBe("Claim $100.00 USDC");
-    // demo marker is never blue
+    // demo marker is never blue, but the settlement reads on the line
     expect(card.querySelector("[data-testid=fall-marker]")!.getAttribute("data-verified")).toBe("false");
+    expect(card.querySelector("[data-testid=mark-label]")!.textContent).toBe("Monday mark (demo) 3.00%");
+    expect(card.textContent).not.toMatch(/Payout starts at 1%|Full payout at 5%/);
+    expect(within(card).getByTestId("marks").textContent).toContain("Demo time, compressed");
     await click(primaries[0]);
     expect(screen.getByTestId("cover-card")).toBe(card);
     expect(card.getAttribute("data-status")).toBe("Claimed");
@@ -238,11 +241,25 @@ describe("real two-step buy", () => {
 });
 
 describe("New York times", () => {
-  it("keeps 16:00 and 09:30 ET across the November clock change", async () => {
+  it("keeps 16:00 and 09:30 ET across the clock change, and demo uses the upcoming weekend", async () => {
     const { demoWeekend, nextWeekend, fmtEtDay } = await import("../lib/cover");
     const now = Date.UTC(2026, 10, 3, 21); // Tue 3 Nov 2026
     const d = demoWeekend(now), n = nextWeekend(now);
-    expect([fmtEtDay(d.friday), fmtEtDay(d.monday)]).toEqual(["Fri 30 Oct, 16:00 ET", "Mon 2 Nov, 09:30 ET"]);
+    expect([fmtEtDay(d.friday), fmtEtDay(d.monday)]).toEqual(["Fri 6 Nov, 16:00 ET", "Mon 9 Nov, 09:30 ET"]);
+    const early = nextWeekend(Date.UTC(2026, 9, 27, 12));
+    expect([fmtEtDay(early.friday), fmtEtDay(early.monday)]).toEqual(["Fri 30 Oct, 16:00 ET", "Mon 2 Nov, 09:30 ET"]);
     expect([fmtEtDay(n.friday), fmtEtDay(n.monday), fmtEtDay(n.buyBy)]).toEqual(["Fri 6 Nov, 16:00 ET", "Mon 9 Nov, 09:30 ET", "Sun 8 Nov, 17:50 ET"]);
+  });
+});
+
+describe("voided copy", () => {
+  it("says Refunded once the premium is back", async () => {
+    const { whatNow } = await import("../lib/cover");
+    const c = { id: "v", kind: "real" as const, symbol: "NVDA", holding: 5000, contracts: 200, premium: 24, fridayPrice: 180, fridayAt: null, mondayAt: null, mondayPrice: null, status: "Voided" as const };
+    expect(whatNow({ ...c, refunded: true })).toMatch(/^Refunded\./);
+    expect(whatNow(c)).not.toMatch(/refunded/i);
+    render(<CoverCard c={{ ...c, refunded: true }} holdingLabel="Your holding" />);
+    expect(screen.getByTestId("void-line").textContent).toContain("Refunded: premium $24.00.");
+    expect(screen.getByTestId("void-line").textContent).not.toMatch(/comes back/);
   });
 });
