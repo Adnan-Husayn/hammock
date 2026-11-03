@@ -1,7 +1,7 @@
 import { fmtUsd } from "../lib/program";
 import { tokenName } from "../lib/markets";
 import { signedUsd } from "../lib/line";
-import { fmtEtDay, payoutFor, type CoverKind, type CoverRecord } from "../lib/cover";
+import { fmtEtDay, payoutFor, statusLabel, type CoverKind, type CoverRecord } from "../lib/cover";
 import { isActive, totals } from "../lib/ledger";
 
 function Row({ c }: { c: CoverRecord }) {
@@ -9,7 +9,7 @@ function Row({ c }: { c: CoverRecord }) {
     <li className="ledger-row" data-testid="ledger-row" data-status={c.status}>
       <span className="ledger-what">{tokenName(c.symbol)}, {c.contracts} contracts{c.kind === "demo" && <span className="badge">Demo</span>}</span>
       <span className="ledger-when">{c.fridayAt ? `Friday mark ${fmtEtDay(c.fridayAt)}` : ""}</span>
-      <span className="ledger-status">{c.status}</span>
+      <span className="ledger-status">{statusLabel(c)}</span>
       <span className="ledger-fig num fig">premium {fmtUsd(c.premium)}{c.status === "Claimed" && <>, payout {fmtUsd(payoutFor(c))}</>}</span>
     </li>
   );

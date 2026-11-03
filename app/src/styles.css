@@ -249,7 +249,8 @@ button.quiet { border-color:var(--rule); color:var(--ink-2); min-height:40px; }
 .proof-link.is-verified { color:var(--proof); text-decoration-color:var(--proof); }
 .key-verified { width:10px; height:10px; border-radius:50%; background:var(--proof); }
 .proof .card { margin:8px 0 0; }
-.buy-flow { border-style:dashed; }
+.buy-flow { border:0; outline:none; padding:0; }
+.buy-flow:focus:not(:focus-visible) { outline:none; }
 .buy-steps { display:flex; gap:4px 16px; list-style:none; padding:0; margin:0 0 8px; font:600 12px var(--grot); color:var(--ink-3); text-transform:uppercase; letter-spacing:.06em; }
 .buy-steps [aria-current="step"] { color:var(--ink); }
 .buy-flow .picker { margin:4px 0 10px; }

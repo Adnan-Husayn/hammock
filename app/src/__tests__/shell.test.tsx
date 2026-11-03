@@ -162,6 +162,9 @@ describe("ledger", () => {
     const ledger = screen.getByTestId("ledger");
     expect(within(ledger).getByText("Active")).toBeTruthy();
     await click(screen.getByTestId("skip-monday"));
+    expect(within(ledger).getByTestId("ledger-row").querySelector(".ledger-status")!.textContent).toBe("Demo mark final");
+    expect(screen.getByTestId("how").textContent).toContain("Past 5%, the payout stays at $1.00 and your net loss grows again.");
+    expect(document.body.textContent).not.toMatch(/not covered/);
     await click(screen.getByRole("button", { name: "Claim $100.00 USDC" }));
     expect(within(ledger).getByText("Past")).toBeTruthy();
     expect(screen.getByTestId("totals-demo").textContent).toBe("Demo totals, no real moneyPremiums paid$23.91Payouts claimed$100.00Net$76.09");
