@@ -236,3 +236,13 @@ describe("real two-step buy", () => {
     await waitFor(() => expect(d.wallet!.signTransaction).toHaveBeenCalledTimes(1));
   });
 });
+
+describe("New York times", () => {
+  it("keeps 16:00 and 09:30 ET across the November clock change", async () => {
+    const { demoWeekend, nextWeekend, fmtEtDay } = await import("../lib/cover");
+    const now = Date.UTC(2026, 10, 3, 21); // Tue 3 Nov 2026
+    const d = demoWeekend(now), n = nextWeekend(now);
+    expect([fmtEtDay(d.friday), fmtEtDay(d.monday)]).toEqual(["Fri 30 Oct, 16:00 ET", "Mon 2 Nov, 09:30 ET"]);
+    expect([fmtEtDay(n.friday), fmtEtDay(n.monday), fmtEtDay(n.buyBy)]).toEqual(["Fri 6 Nov, 16:00 ET", "Mon 9 Nov, 09:30 ET", "Sun 8 Nov, 17:50 ET"]);
+  });
+});

@@ -116,27 +116,38 @@ export function fmtEtDay(ms: number) {
   return `${g("weekday")} ${g("day")} ${g("month")}, ${g("hour")}:${g("minute")} ET`;
 }
 
-/** The next Friday 16:00 ET mark strictly after now, and the Monday 09:30 ET mark after it. */
-export function nextWeekend(nowMs: number) {
+/** Friday 16:00 ET, Monday 09:30 ET and the Sunday 17:50 ET buy-by for the Friday on a given calendar date. */
+function weekendOf(y: number, m: number, d: number) {
+  return {
+    friday: etToUtc(y, m, d, 16, 0),
+    monday: etToUtc(y, m, d + 3, 9, 30),
+    // Buying closes on Sunday evening in the configured markets; a real market's own close replaces this.
+    buyBy: etToUtc(y, m, d + 2, 17, 50),
+  };
+}
+
+function fridayDates(nowMs: number) {
   const n = etParts(nowMs);
   for (let i = 0; i < 8; i++) {
     const day = new Date(Date.UTC(n.y, n.m, n.d + i));
     if (day.getUTCDay() !== 5) continue;
-    const friday = etToUtc(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 16, 0);
-    if (friday <= nowMs) continue;
-    const monday = etToUtc(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + 3, 9, 30);
-    // Buying closes on Sunday evening in the configured markets; a real market's own close replaces this.
-    const buyBy = etToUtc(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + 2, 17, 50);
-    return { friday, monday, buyBy };
+    const w = weekendOf(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+    if (w.friday > nowMs) return day;
   }
   throw new Error("unreachable");
 }
 
-/** The latest Friday 16:00 ET mark at or before now, for a demo run, and its Monday. */
+/** The next Friday 16:00 ET mark strictly after now, the Monday 09:30 ET mark after it, and the buy-by time. */
+export function nextWeekend(nowMs: number) {
+  const day = fridayDates(nowMs);
+  return weekendOf(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+}
+
+/** The weekend before the next one, for a demo run. Computed on the calendar so a clock change cannot shift it. */
 export function demoWeekend(nowMs: number) {
-  const { friday, monday } = nextWeekend(nowMs);
-  const week = 7 * 86_400_000;
-  return { friday: friday - week, monday: monday - week };
+  const day = fridayDates(nowMs);
+  const w = weekendOf(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() - 7);
+  return { friday: w.friday, monday: w.monday };
 }
 
 /* ---------- Receipt export ---------- */
