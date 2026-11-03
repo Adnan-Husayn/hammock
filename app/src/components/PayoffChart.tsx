@@ -10,8 +10,12 @@ export const PHONE_TICKS = [0, 0.01, 0.03, 0.05, 0.08];
  * Net loss against Monday's fall, 0% to 8%. Loss is drawn downward, so the uncovered line keeps falling.
  * The viewBox follows the drawn width one to one, so text stays at its real size and the line never stretches.
  */
-export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, label }: {
+export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, label, verified, estimateFall }: {
   holding: number; contracts: number; premiumTotal: number; fall: number; onFall?: (f: number) => void; label: string;
+  /** The measured fall from signed Pyth marks: the marker turns blue. */
+  verified?: boolean;
+  /** Weekend token move, drawn as a faint separate marker. It never moves the payout marker. */
+  estimateFall?: number | null;
 }) {
   const svg = useRef<SVGSVGElement>(null);
   const [W, setW] = useState(920);
@@ -81,6 +85,12 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
       <path className="uncovered" d={path(bare)} data-testid="uncovered-line" />
       <path className="covered" d={path(covered)} data-testid="covered-line" />
       {flat && <text className="flat-label" x={fall < (DETENTS[0] + DETENTS[1]) / 2 ? x(DETENTS[1]) - 6 : x(DETENTS[0]) + 6} y={y(l1) - 22} textAnchor={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "end" : "start"} data-side={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "right" : "left"} data-testid="flat-label">{`flat at ${signedUsd(-l1)}`}</text>}
+      {estimateFall != null && estimateFall >= 0 && estimateFall <= FALL_MAX && (
+        <g className="estimate-marker" data-testid="estimate-marker">
+          <line x1={x(estimateFall)} x2={x(estimateFall)} y1={T} y2={H - B} />
+          <circle r={6} cx={x(estimateFall)} cy={y(netLoss(holding, estimateFall, contracts, premiumTotal))} />
+        </g>
+      )}
       <line className="marker-rule" x1={x(fall)} x2={x(fall)} y1={T} y2={H - B} />
       {onFall ? (
         <g
@@ -91,7 +101,7 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
           <circle r={28} cx={x(fall)} cy={y(here)} className="hit" />
           <circle r={11} cx={x(fall)} cy={y(here)} className="dot" />
         </g>
-      ) : <circle r={10} cx={x(fall)} cy={y(here)} className="dot" />}
+      ) : <circle r={10} cx={x(fall)} cy={y(here)} className={verified ? "dot dot-verified" : "dot"} data-testid="fall-marker" data-verified={verified ? "true" : "false"} />}
     </svg>
   );
 }
