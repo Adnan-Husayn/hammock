@@ -1,20 +1,24 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AppDeps } from "./lib/api";
-import type { MarketInfo } from "./lib/program";
+import { fmtUsd, suggestedContracts, type MarketInfo } from "./lib/program";
+import { BuyFlow, type BuyStep } from "./components/BuyFlow";
 import { BuyPanel } from "./components/BuyPanel";
-import { Calculator } from "./components/Calculator";
-import { LockedView } from "./components/LockedView";
-import { ProofScreen } from "./components/ProofScreen";
-import { Sandbox } from "./components/Sandbox";
-import { Settle } from "./components/Settle";
+import { CoverCard } from "./components/CoverCard";
+import { Ledger } from "./components/Ledger";
 import { PriceTracks } from "./components/PriceTracks";
+import { RealCover } from "./components/RealCover";
 import { Replays } from "./components/Replays";
-import { QuickWeekend } from "./components/Sandbox";
+import { QuickWeekend, Sandbox } from "./components/Sandbox";
 import { StateTag, type Certainty } from "./components/StateTag";
-import type { ModeId } from "./components/Calculator";
-import { PRODUCT_NAME } from "./brand";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { PRODUCT_NAME } from "./brand";
 import { enabledStocks } from "./lib/markets";
+import { SAMPLE_PREMIUM } from "./lib/line";
+import {
+  DEMO_FRIDAY, DEMO_HOLDING, DEMO_MONDAY, DEMO_PREMIUM_PER_CONTRACT, DEMO_TIME_LABEL, demoWeekend, fmtEtDay, nextWeekend,
+  payoutFor, settledStatus, type CoverRecord,
+} from "./lib/cover";
+import { loadLedger, saveLedger, upsert } from "./lib/ledger";
 
 /** Market buying close in New York time, for example "Sunday 17:50". */
 export const fmtEt = (ts: bigint) =>
@@ -33,59 +37,127 @@ export function phaseOf(m: MarketInfo | null, nowMs: number): Phase {
 
 const COPY: Record<Phase, [string, string]> = {
   none: ["No live {sym} market this weekend", "Run a demo weekend or {replay}."],
-  created: ["Waiting for the Friday afternoon mark", "Buying starts once it is final."],
+  created: ["Friday mark not in yet", "Buying starts once it is final."],
   buying: ["Buying now", ""],
-  locked: ["Locked", "Buying has ended. The payout is fixed at the Monday morning mark."],
-  settled: ["Settled", "Both marks are final. Claim your payout below."],
-  voided: ["Voided", "This market did not settle. Refund your premium below."],
+  locked: ["Buying has ended", "The Monday morning mark decides the payout."],
+  settled: ["Settled", "Both marks are final."],
+  voided: ["Voided", "This market did not settle. Buyers can take a refund of the premium."],
 };
 
 /** How settled the market is, shown in the status line. */
 const CERTAINTY: Record<Phase, Certainty | null> = { none: null, created: "observed", buying: "estimate", locked: "estimate", settled: "final", voided: "final" };
 
+/** Seconds a compressed demo weekend takes from Cover active to the Monday mark. */
+export const DEMO_WEEKEND_MS = 4000;
+
+type Flow = { kind: "demo" | "real"; step: BuyStep };
+
 export default function App({ deps, walletButton, onConnectWallet }: { deps: AppDeps; walletButton?: ReactNode; onConnectWallet?: () => void }) {
+  const now = deps.now ?? Date.now;
   const [info, setInfo] = useState<MarketInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [contracts, setContracts] = useState(200);
   const [premium, setPremium] = useState<number | undefined>();
-  const [sandbox, setSandbox] = useState(false);
-  const [mode, setMode] = useState<ModeId>("calc");
   const stocks = deps.stocks?.length ? deps.stocks : enabledStocks();
   const [symbol, setSymbol] = useState(stocks[0].symbol);
   const market = deps.realMarkets ? deps.realMarkets[symbol] ?? null : deps.realMarket;
 
+  const [flow, setFlow] = useState<Flow | null>(null);
+  const [holding, setHolding] = useState(DEMO_HOLDING);
+  const [custom, setCustom] = useState<number | null>(null);
+  const contracts = custom ?? suggestedContracts(holding);
+  const [demo, setDemo] = useState<CoverRecord | null>(null);
+  const [saved, setSaved] = useState<CoverRecord[]>(loadLedger);
+  const [real, setReal] = useState<CoverRecord | null>(null);
+  const [realNonce, setRealNonce] = useState(0);
+  const [howOpen, setHowOpen] = useState(false);
+  const [sandbox, setSandbox] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+
   useEffect(() => {
     setInfo(null);
     setPremium(undefined);
+    setReal(null);
     if (!market) return setLoaded(true);
     let live = true; // a slow read for the previous stock must not land after a switch
     deps.chain.readMarket(market).then((m) => live && setInfo(m)).catch(() => live && setInfo(null)).finally(() => live && setLoaded(true));
     return () => { live = false; };
-  }, [deps.chain, market]);
+  }, [deps.chain, market, realNonce]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  const onQuote = useCallback((p: number) => setPremium(p), []);
-  const [sig, setSig] = useState<string | null>(null);
-  useEffect(() => setSig(null), [market]);
-  const fromReceipts = (m: ModeId) => {
-    setMode(m);
-    setTimeout(() => document.getElementById("instrument")?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 0);
+  const phase = phaseOf(info, now());
+  const weekend = useMemo(() => nextWeekend(now()), [now]);
+  const buyByTs = info && phase === "buying" ? Number(info.buyingCloseTs) * 1000 : weekend.buyBy;
+  const buyBy = fmtEtDay(buyByTs);
+
+  // Demo covers: kept in this browser, written on every status change.
+  const record = useCallback((c: CoverRecord) => {
+    setDemo(c);
+    setSaved((list) => { const next = upsert(list, c); saveLedger(next); return next; });
+  }, []);
+
+  const settleDemo = useCallback((c: CoverRecord) => {
+    window.clearTimeout(timer.current);
+    const done = { ...c, mondayPrice: DEMO_MONDAY };
+    record({ ...done, status: settledStatus(payoutFor(done)) });
+  }, [record]);
+
+  const confirmDemo = () => {
+    const w = demoWeekend(now());
+    const c: CoverRecord = {
+      id: `demo-${now()}`, kind: "demo", symbol, holding, contracts, premium: Math.round(contracts * DEMO_PREMIUM_PER_CONTRACT * 100) / 100,
+      fridayPrice: DEMO_FRIDAY, fridayAt: w.friday, mondayAt: w.monday, mondayPrice: null, status: "Cover active",
+    };
+    record(c);
+    setFlow(null);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => settleDemo(c), DEMO_WEEKEND_MS);
   };
-  const phase = phaseOf(info, (deps.now ?? Date.now)());
+
+  const startDemo = () => { setFlow({ kind: "demo", step: "choose" }); };
+  const startReal = () => (deps.wallet ? setFlow({ kind: "real", step: "choose" }) : onConnectWallet?.());
+  const coverNext = () => (market && phase === "buying" && deps.wallet && !real ? startReal() : startDemo());
+  const showHow = () => {
+    setHowOpen(true);
+    setTimeout(() => document.getElementById("how")?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 0);
+  };
+
+  const ledger = useMemo(() => (real ? [real, ...saved] : saved), [real, saved]);
+  const pickStock = (s: string) => { setSymbol(s); setPremium(undefined); };
+
   const [title, copy] = COPY[phase].map((t) => t.replace("{sym}", symbol));
   const text = phase === "buying" && info ? `Buy cover until ${fmtEt(info.buyingCloseTs)} ET.` : copy;
   const certainty = CERTAINTY[phase];
-
   const status = loaded ? (
     <p className="status" data-testid="state-card" data-state={phase}>
       {certainty && <><StateTag kind={certainty} /> </>}
       <strong>{phase === "none" ? title : `${symbol}: ${title}`}</strong>.
       {text && <> {text.includes("{replay}") ? <>{text.split("{replay}")[0]}<button className="link" data-testid="inspect-replay" onClick={() => {
-        const first = document.querySelector<HTMLButtonElement>("[data-replay-pill]");
-        first?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-        first?.focus();
+        setHowOpen(true);
+        setTimeout(() => {
+          const first = document.querySelector<HTMLButtonElement>("[data-replay-pill]");
+          first?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+          first?.focus();
+        }, 0);
       }}>inspect a replay</button>{text.split("{replay}")[1]}</> : text}</>}
+      {phase === "buying" && !real && !flow && <> <button className="link" data-testid="buy-real" onClick={startReal}>Choose devnet cover</button></>}
     </p>
   ) : null;
+
+  const perContract = flow?.kind === "real" ? premium ?? SAMPLE_PREMIUM : DEMO_PREMIUM_PER_CONTRACT;
+  const preview: CoverRecord = {
+    id: "preview", kind: flow?.kind ?? "demo", symbol, holding, contracts, premium: contracts * perContract,
+    fridayPrice: null, fridayAt: weekend.friday, mondayAt: weekend.monday, mondayPrice: null, status: "Cover active",
+  };
+  const holdingLabel = deps.wallet ? "Your holding" : "Demo holding";
+  const onLanding = !flow && !demo && !real;
+
+  const demoActions = demo?.status === "Monday mark final"
+    ? <button className="primary" data-testid="claim" onClick={() => record({ ...demo, status: "Claimed" })}>Claim {fmtUsd(payoutFor(demo))} USDC</button>
+    : undefined;
+  const compressed = demo?.status === "Cover active" ? (
+    <p className="compressed" data-testid="compressed"><span className="badge">{DEMO_TIME_LABEL}</span> Friday mark in. The Monday mark lands shortly.{" "}
+      <button className="link" data-testid="skip-monday" onClick={() => settleDemo(demo)}>Go to the Monday mark</button></p>
+  ) : undefined;
 
   return (
     <main>
@@ -93,7 +165,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
         <span className="brand">{PRODUCT_NAME}</span>
         <div className="row picker" role="group" aria-label="Stock">
           {stocks.map((s) => (
-            <button key={s.symbol} className={`pill${s.symbol === symbol ? " is-active" : ""}`} aria-pressed={s.symbol === symbol} onClick={() => { setSymbol(s.symbol); setMode("calc"); }}>
+            <button key={s.symbol} className={`pill${s.symbol === symbol ? " is-active" : ""}`} aria-pressed={s.symbol === symbol} onClick={() => pickStock(s.symbol)}>
               {s.symbol}
             </button>
           ))}
@@ -101,23 +173,66 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
         <div className="utils"><span className="badge env">Solana devnet, demo tokens</span><ThemeToggle /></div>
         <div className="wallet-slot">{walletButton}</div>
       </header>
-      <h1 className="hero">Keep the token. Know your loss on a 1% to 5% Monday fall.</h1>
-      <p className="lead">If the Monday Pyth mark is more than 1% below Friday's, you are paid in USDC, rising to the full payout at a 5% fall.</p>
-      <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} />
-      <div id="instrument">
-        <Calculator symbol={symbol} premiumPerContract={premium} onContracts={setContracts} status={status}
-          live={!!info && phase !== "none"} modeId={mode} onMode={setMode}
-          verifiedAvailable={!!deps.verifiedMarket} onVerified={() => document.getElementById("replays")?.scrollIntoView?.({ behavior: "smooth" })} />
-      </div>
-      {info && <section className="card"><PriceTracks deps={deps} info={info} symbol={symbol} /></section>}
-      {market && info && phase === "buying" && <BuyPanel deps={deps} market={market} info={info} contracts={contracts} onQuote={onQuote} />}
-      {market && info && phase === "locked" && <LockedView deps={deps} market={market} info={info} />}
-      {market && info && (phase === "settled" || phase === "voided") && <Settle deps={deps} market={market} info={info} onSent={setSig} />}
-      {market && info && (phase === "settled" || phase === "voided") && <ProofScreen deps={deps} market={market} info={info} transferSig={sig} />}
-      <Replays deps={deps} selected={mode === "calc" ? undefined : mode} onSelect={fromReceipts} />
-      {sandbox ? <Sandbox key={symbol} deps={deps} symbol={symbol} /> : (
-        <p className="note"><button className="link" onClick={() => setSandbox(true)}>Sandbox with step-by-step controls</button></p>
+
+      {onLanding && (
+        <section className="landing" data-testid="landing">
+          <h1 className="hero">Keep the token. Know your loss on a 1% to 5% Monday fall.</h1>
+          <p className="lead" data-testid="market-closed">Stock market closed for 65h 30m. Token still trades.</p>
+          <div className="row actions">
+            <button className="primary" data-testid="run-demo" onClick={startDemo}>Run a demo weekend</button>
+            <button data-testid="see-how" onClick={showHow}>See how cover works</button>
+          </div>
+        </section>
       )}
+      {!onLanding && <h1 className="hero hero-small">Keep the token. Know your loss on a 1% to 5% Monday fall.</h1>}
+      {status && <div className="status-line">{status}</div>}
+
+      {flow && (
+        <BuyFlow step={flow.step} kind={flow.kind} stocks={stocks} symbol={symbol} onSymbol={pickStock}
+          holding={holding} onHolding={setHolding} contracts={contracts} onContracts={setCustom}
+          premiumPerContract={perContract} sample={flow.kind === "demo" || premium === undefined}
+          mondayAt={flow.kind === "real" && info ? Number(info.mondayTargetUs / 1000n) : flow.kind === "demo" ? demoWeekend(now()).monday : weekend.monday}
+          expiry={flow.kind === "demo" ? "Demo quote, fixed for this run" : "Shown with the live quote below, refreshed every 60 s"}
+          confirm={flow.kind === "demo"
+            ? <button className="primary" data-testid="confirm-demo" onClick={confirmDemo}>Confirm demo cover</button>
+            : market && info ? <BuyPanel deps={deps} market={market} info={info} contracts={contracts} embedded onQuote={setPremium}
+                onBought={() => { setFlow(null); setRealNonce((n) => n + 1); }} /> : <p className="note">No devnet market to buy from.</p>}
+          onNext={() => setFlow({ ...flow, step: "review" })} onBack={() => setFlow({ ...flow, step: "choose" })} onCancel={() => setFlow(null)} />
+      )}
+
+      {market && info && (
+        <RealCover key={`${market.toBase58()}-${realNonce}`} deps={deps} market={market} info={info} symbol={symbol}
+          buyBy={phase === "buying" ? fmtEtDay(Number(info.buyingCloseTs) * 1000) : undefined} onRecord={setReal} />
+      )}
+      {demo && !(flow?.kind === "demo") && (
+        <CoverCard key={demo.id} c={demo} holdingLabel="Demo holding" actions={demoActions} compressed={compressed} />
+      )}
+      {(onLanding || flow) && <CoverCard key="preview" c={preview} preview holdingLabel={holdingLabel} />}
+
+      <Ledger list={ledger} nextFriday={weekend.friday} buyBy={buyBy} onCoverNext={coverNext} />
+
+      <section className="card how" id="how" data-testid="how">
+        <div className="card-head">
+          <h2>How cover works</h2>
+          <button className="link" aria-expanded={howOpen} onClick={() => setHowOpen((v) => !v)}>{howOpen ? "Hide" : "Show"}</button>
+        </div>
+        <dl className="mechanics">
+          <div><dt>Marks</dt><dd>The payout compares the Friday 16:00 ET mark with the Monday 09:30 ET mark.</dd></div>
+          <div><dt>Pyth</dt><dd>Both marks are signed Pyth prices. Token prices over the weekend do not count.</dd></div>
+          <div><dt>Band</dt><dd>Nothing at a fall of 1% or less. Each contract then rises to $1.00 at 5% or more. Losses past 5% are not covered.</dd></div>
+          <div><dt>Size</dt><dd>One contract per $25 of the token keeps net loss flat across the band.</dd></div>
+        </dl>
+        {howOpen && (
+          <>
+            {info && <PriceTracks deps={deps} info={info} symbol={symbol} />}
+            <Replays deps={deps} />
+            <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} />
+            {sandbox ? <Sandbox key={symbol} deps={deps} symbol={symbol} /> : (
+              <p className="note"><button className="link" onClick={() => setSandbox(true)}>Sandbox with step-by-step controls</button></p>
+            )}
+          </>
+        )}
+      </section>
       <footer className="note">Devnet only. Pyth marks decide payouts. Token prices and demo prices do not.</footer>
     </main>
   );

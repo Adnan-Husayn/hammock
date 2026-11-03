@@ -213,3 +213,69 @@ button.ghost { min-height:40px; }
   .arith .sep { display:none; }
 }
 @media (max-width:385px) { .top .picker { flex-wrap:wrap; } }
+.chart .dot-verified { fill:var(--proof); stroke:var(--proof); }
+.chart .estimate-marker line { stroke:var(--ink-3); stroke-dasharray:2 4; }
+.chart .estimate-marker circle { fill:none; stroke:var(--ink-3); stroke-width:1.5; stroke-dasharray:2 2; }
+
+/* Product shell: one column, the cover card in the centre */
+main { max-width:760px; }
+.landing { margin:8px 0 4px; }
+.landing .actions { margin:12px 0 4px; }
+.hero-small { font-size:1.15rem; margin:4px 0 6px; }
+.status-line { margin:6px 0; }
+button.quiet { border-color:var(--rule); color:var(--ink-2); min-height:40px; }
+.cover-card { border-color:var(--ink); }
+.cover-title { margin:0; }
+.cover-holding { margin:2px 0 0; color:var(--ink-2); font-weight:600; }
+.status-word { display:inline-block; font:600 12px/1 var(--grot); padding:6px 10px; border-radius:999px; border:1px solid var(--ink); color:var(--ink); white-space:nowrap; }
+.status-preview { border-style:dashed; color:var(--ink-2); border-color:var(--rule-2); }
+.status-monday, .status-claimed { background:var(--ink); color:var(--surface); }
+.status-expired, .status-voided { color:var(--ink-2); border-color:var(--rule-2); }
+.facts { grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px 16px; margin:12px 0; }
+.facts > div, .settled-lines > div { display:flex; flex-direction:column; }
+.facts dt, .settled-lines dt, .ledger-next dt { font:600 11px var(--grot); text-transform:uppercase; letter-spacing:.06em; color:var(--ink-2); }
+.facts dd, .settled-lines dd { text-align:left; font:600 1rem var(--grot); font-variant-numeric:tabular-nums; }
+.facts .when { display:block; font:400 .8rem var(--sans); color:var(--ink-2); }
+.what-now { margin:4px 0 8px; padding:8px 0; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
+.what-now .micro { margin-right:6px; }
+.settled-lines { grid-template-columns:repeat(3, minmax(0,1fr)); gap:4px 16px; margin:8px 0 0; }
+.sum-line { margin:8px 0 0; padding-top:6px; border-top:1px solid var(--rule); font:500 .95rem var(--grot); color:var(--ink-2); overflow-wrap:anywhere; }
+.void-line { font-weight:600; }
+.compressed { margin:6px 0; font-size:.9rem; color:var(--ink-2); }
+.compressed .badge { margin-right:6px; }
+.card-actions { margin:12px 0 4px; }
+.card-actions .primary, .card-actions .settle .primary { width:100%; }
+.card-foot { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; margin-top:12px; padding-top:8px; border-top:1px solid var(--rule); }
+.proof-link.is-verified { color:var(--proof); text-decoration-color:var(--proof); }
+.key-verified { width:10px; height:10px; border-radius:50%; background:var(--proof); }
+.proof .card { margin:8px 0 0; }
+.buy-flow { border-style:dashed; }
+.buy-steps { display:flex; gap:4px 16px; list-style:none; padding:0; margin:0 0 8px; font:600 12px var(--grot); color:var(--ink-3); text-transform:uppercase; letter-spacing:.06em; }
+.buy-steps [aria-current="step"] { color:var(--ink); }
+.buy-flow .picker { margin:4px 0 10px; }
+.review { margin:8px 0; }
+.review dd { font-weight:600; }
+.review .note { font-weight:400; }
+.outcomes { width:100%; border-collapse:collapse; margin:8px 0 12px; font-variant-numeric:tabular-nums; }
+.outcomes caption { text-align:left; padding-bottom:4px; }
+.outcomes th, .outcomes td { text-align:right; padding:4px 0; border-top:1px solid var(--rule); }
+.outcomes th:first-child { text-align:left; }
+.outcomes td:nth-child(2) { color:var(--loss); font-weight:700; }
+.confirm-row { align-items:flex-start; }
+.buy-live { flex:1 1 100%; }
+.ledger-list { list-style:none; padding:0; margin:0 0 8px; }
+.ledger-row { display:grid; grid-template-columns:1fr auto; gap:0 12px; padding:6px 0; border-top:1px solid var(--rule); font-size:.9rem; }
+.ledger-row .badge { margin-left:6px; padding:3px 6px; }
+.ledger-when { color:var(--ink-2); text-align:right; }
+.ledger-status { font-weight:600; }
+.ledger-fig { text-align:right; color:var(--ink-2); }
+.ledger-sums { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:0 16px; }
+.ledger-totals dl, .ledger-next { margin:4px 0 8px; }
+.how .mechanics { margin-top:8px; }
+@media (max-width:560px) {
+  .settled-lines { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .ledger-row { grid-template-columns:1fr; }
+  .ledger-when, .ledger-fig { text-align:left; }
+  .landing .actions button { flex:1 1 100%; }
+  .facts { grid-template-columns:1fr 1fr; }
+}

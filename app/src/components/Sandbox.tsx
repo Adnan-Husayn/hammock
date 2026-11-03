@@ -6,6 +6,8 @@ import { tokenName } from "../lib/markets";
 import { BuyPanel } from "./BuyPanel";
 import { ProofScreen } from "./ProofScreen";
 import { Settle } from "./Settle";
+import { RealCover } from "./RealCover";
+import { article } from "../lib/line";
 
 /** Shared sandbox state: start a market, buy, ring the bell, settle. */
 function useSandbox(deps: AppDeps, symbol: string) {
@@ -100,27 +102,29 @@ export function QuickWeekend({ deps, symbol, onConnect }: { deps: AppDeps; symbo
   });
   const onBought = useCallback(() => {
     s.setBought(true);
+    setNonce((n) => n + 1);
     setStep(3);
     s.run(async () => { s.setNote(await s.ring(s.market!)); setStep(4); });
   }, [s.market]);
   const onSent = useCallback((sig: string) => { s.setSig(sig); setStep(5); }, []);
+  const [nonce, setNonce] = useState(0);
   return (
     <section className="card quick" id="weekend" data-testid="quick-weekend">
       <div className="strip">
         <div className="strip-text">
-          <h2>Run a demo weekend on devnet</h2>
-          <p className="note">You need a wallet, not real funds.</p>
+          <h2>Run a weekend on devnet</h2>
+          <p className="note">With a wallet and demo tokens, not real funds.</p>
         </div>
         <ol className="steps">
           {STEPS.map((t, i) => <li key={t} data-done={i < step} data-now={i === step && (s.market !== null || s.busy)}>{t}</li>)}
         </ol>
-        <button className="primary" data-testid="run-weekend" disabled={s.busy} onClick={deps.wallet ? go : onConnect}>
-          {s.market ? "Run another weekend" : `Run a demo ${symbol} weekend`}
+        <button data-testid="run-devnet" disabled={s.busy} onClick={deps.wallet ? go : onConnect}>
+          {s.market ? "Run another devnet weekend" : `Run ${article(symbol)} ${symbol} weekend on devnet`}
         </button>
       </div>
       {s.note && <p className="note">{s.note}</p>}
       {s.market && s.info && !s.rung && !s.bought && <BuyPanel deps={deps} market={s.market} info={s.info} contracts={200} onBought={onBought} balanceNonce={s.faucetCount} />}
-      {s.market && s.info && s.rung && <><Settle deps={deps} market={s.market} info={s.info} onSent={onSent} /><ProofScreen deps={deps} market={s.market} info={s.info} transferSig={s.sig} contracts={200} /></>}
+      {s.market && s.info && s.bought && <RealCover deps={deps} market={s.market} info={s.info} symbol={symbol} nonce={nonce} onSettled={onSent} />}
     </section>
   );
 }
