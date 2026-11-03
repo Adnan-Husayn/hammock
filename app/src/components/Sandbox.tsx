@@ -3,7 +3,6 @@ import { PublicKey } from "@solana/web3.js";
 import type { AppDeps } from "../lib/api";
 import { fmtUsd, price, type MarketInfo } from "../lib/program";
 import { tokenName } from "../lib/markets";
-import { article } from "../lib/line";
 import { BuyPanel } from "./BuyPanel";
 import { ProofScreen } from "./ProofScreen";
 import { Settle } from "./Settle";
@@ -110,13 +109,13 @@ export function QuickWeekend({ deps, symbol, onConnect }: { deps: AppDeps; symbo
       <div className="strip">
         <div className="strip-text">
           <h2>Run a demo weekend on devnet</h2>
-          <p className="note">Demo tokens and network fees are covered. You need a wallet, not real funds.</p>
+          <p className="note">You need a wallet, not real funds.</p>
         </div>
         <ol className="steps">
           {STEPS.map((t, i) => <li key={t} data-done={i < step} data-now={i === step && (s.market !== null || s.busy)}>{t}</li>)}
         </ol>
         <button className="primary" data-testid="run-weekend" disabled={s.busy} onClick={deps.wallet ? go : onConnect}>
-          {s.market ? "Run another weekend" : `Run ${article(symbol)} ${symbol} weekend`}
+          {s.market ? "Run another weekend" : `Run a demo ${symbol} weekend`}
         </button>
       </div>
       {s.note && <p className="note">{s.note}</p>}

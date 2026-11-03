@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fmtUsd, suggestedContracts } from "../lib/program";
 import { tokenName } from "../lib/markets";
-import { bandSlope, fmtPct, PARTIAL_COVER_LABEL, readout, SAMPLE_PREMIUM, signedUsd } from "../lib/line";
+import { bandSlope, fmtFall, PARTIAL_COVER_LABEL, readout, SAMPLE_PREMIUM, signedUsd } from "../lib/line";
 import { PayoffChart } from "./PayoffChart";
 import { DEMO_REPLAYS, demoView, type DemoId } from "./Replays";
 
@@ -59,12 +59,12 @@ export function Calculator({ symbol, premiumPerContract, onContracts, status, li
   return (
     <section className="card instrument" data-testid="instrument" data-mode={mode}>
       <div className="card-head">
-        <h2>Your cover at a {fmtPct(fall)} fall</h2>
+        <h2>Your cover at a {fmtFall(fall)} fall</h2>
         <div className="row modes" role="group" aria-label="Instrument mode">
-          <button className="pill" aria-pressed={modeId === "calc"} onClick={() => pick("calc")}>Calculator</button>
+          <button className={`pill${modeId === "calc" ? " is-active" : ""}`} aria-pressed={modeId === "calc"} onClick={() => pick("calc")}>Calculator</button>
           <span className="group-label" data-testid="demo-group-label">Demo replays:</span>
           {DEMO_REPLAYS.map((x) => (
-            <button key={x.id} className="pill" aria-pressed={modeId === x.id} onClick={() => pick(x.id)}>{x.name}</button>
+            <button key={x.id} className={`pill${modeId === x.id ? " is-active" : ""}`} data-replay-pill aria-pressed={modeId === x.id} onClick={() => pick(x.id)}>{x.name}</button>
           ))}
           {verifiedAvailable && <button className="pill pill-verified" onClick={onVerified}>Verified</button>}
         </div>
@@ -76,7 +76,7 @@ export function Calculator({ symbol, premiumPerContract, onContracts, status, li
         <div className="controls replay-controls">
           <p data-testid="replay-note"><span className="badge">Demo replay</span> {replay.voided
             ? `Void: no Monday mark met the rules, so each buyer takes back the premium. ${fmtUsd(holding)} of ${token}, ${contracts} contracts.`
-            : `${fmtUsd(holding)} of ${token}, ${contracts} contracts, a ${fmtPct(fall)} fall. Demo prices, not Pyth.`}</p>
+            : `${fmtUsd(holding)} of ${token}, ${contracts} contracts, a ${fmtFall(fall)} fall. Demo prices, not Pyth.`}</p>
         </div>
       ) : (
         <div className="controls">
@@ -101,7 +101,7 @@ export function Calculator({ symbol, premiumPerContract, onContracts, status, li
         </div>
         <div className="deck-right">
           <div className="figure">
-            <p className="micro">{replay?.voided ? "Void, premium refunded" : `Net loss at a ${fmtPct(fall)} fall`}</p>
+            <p className="micro">{replay?.voided ? "Void, premium refunded" : `Net loss at a ${fmtFall(fall)} fall`}</p>
             <p className="hero-line">
               <span className="big num fig loss" data-testid="net-loss">{signedUsd(-r.netLoss)}</span>
               <span className="compare fig" data-testid="uncovered">without cover {signedUsd(-r.holdingLoss)}</span>

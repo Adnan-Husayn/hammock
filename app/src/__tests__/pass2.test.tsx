@@ -30,9 +30,9 @@ describe("article per symbol", () => {
   it("labels the run button with the right article", async () => {
     render(<App deps={deps({ market: null })} />);
     await screen.findByTestId("state-card");
-    expect(screen.getByTestId("run-weekend").textContent).toBe("Run an NVDA weekend");
+    expect(screen.getByTestId("run-weekend").textContent).toBe("Run a demo NVDA weekend");
     await act(async () => fireEvent.click(within(screen.getByRole("group", { name: "Stock" })).getByRole("button", { name: "TSLA" })));
-    expect(screen.getByTestId("run-weekend").textContent).toBe("Run a TSLA weekend");
+    expect(screen.getByTestId("run-weekend").textContent).toBe("Run a demo TSLA weekend");
   });
 });
 
@@ -116,7 +116,9 @@ describe("pass 3", () => {
   it("keeps the stock pills and the devnet pill in one group in the header", async () => {
     render(<App deps={deps({ market: null })} />);
     await screen.findByTestId("state-card");
-    expect(within(screen.getByRole("group", { name: "Stock" })).getByText("Solana devnet, demo tokens")).toBeTruthy();
+    const env = screen.getByText("Solana devnet, demo tokens");
+    expect(env.parentElement).toBe(screen.getByTestId("theme-toggle").parentElement);
+    expect(env.parentElement!.contains(screen.getByRole("group", { name: "Stock" }))).toBe(false);
   });
 });
 
@@ -183,9 +185,11 @@ describe("pass 5", () => {
     render(<App deps={deps({ market: null })} />);
     const b = screen.getByTestId("theme-toggle");
     expect(b.getAttribute("data-theme-choice")).toBe("system");
-    expect(b.getAttribute("aria-label")).toMatch(/Theme: system/);
+    expect(b.getAttribute("aria-label")).toMatch(/^Theme: Auto/);
+    expect(b.textContent).toBe(" Theme: Auto");
     fireEvent.click(b);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    expect(b.textContent).toBe(" Theme: Light");
     expect(localStorage.getItem("theme")).toBe("light");
     fireEvent.click(b);
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
@@ -195,5 +199,43 @@ describe("pass 5", () => {
     expect(localStorage.getItem("theme")).toBeNull();
     expect(css).toMatch(/:root\[data-theme="dark"\]/);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("pass 6", () => {
+  it("states the market once with a link that focuses the replay pills", async () => {
+    render(<App deps={deps({ market: null })} />);
+    const card = await screen.findByTestId("state-card");
+    expect(card.textContent).toBe("No live NVDA market this weekend. Run a demo weekend or inspect a replay.");
+    await act(async () => fireEvent.click(screen.getByTestId("inspect-replay")));
+    expect(document.activeElement?.textContent).toBe("No payout");
+  });
+  it("marks the active stock and mode pill with the quiet fill class", async () => {
+    render(<App deps={deps({ market: null })} />);
+    await screen.findByTestId("state-card");
+    const modes = screen.getByRole("group", { name: "Instrument mode" });
+    expect(within(modes).getByRole("button", { name: "Calculator" }).classList.contains("is-active")).toBe(true);
+    expect(within(screen.getByRole("group", { name: "Stock" })).getByRole("button", { name: "NVDA" }).classList.contains("is-active")).toBe(true);
+    await act(async () => fireEvent.click(within(modes).getByRole("button", { name: "Partial fall" })));
+    expect(within(modes).getByRole("button", { name: "Calculator" }).classList.contains("is-active")).toBe(false);
+    expect(within(modes).getByRole("button", { name: "Partial fall" }).classList.contains("is-active")).toBe(true);
+    expect(css).toMatch(/\.pill\.is-active \{[^}]*background:var\(--chip\)/);
+  });
+  it("wraps the mode pills on phones instead of scrolling", () => {
+    const phone = css.slice(css.indexOf("@media (max-width:560px)"));
+    expect(phone).toMatch(/\.modes \{ flex-wrap:wrap; \}/);
+    expect(css).not.toMatch(/\.modes \{[^}]*overflow-x/);
+  });
+  it("shows the fall at the input's precision and the short strip sub", () => {
+    render(<Calculator symbol="NVDA" />);
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Your cover at a 3% fall");
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Monday fall" }), { key: "ArrowRight" });
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Your cover at a 3.25% fall");
+  });
+  it("the run strip sub drops the fees phrase", async () => {
+    render(<App deps={deps({ market: null })} />);
+    await screen.findByTestId("state-card");
+    expect(screen.getByTestId("quick-weekend").textContent).toContain("You need a wallet, not real funds.");
+    expect(screen.getByTestId("quick-weekend").textContent).not.toMatch(/fees/);
   });
 });

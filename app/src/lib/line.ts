@@ -86,6 +86,9 @@ export function snapFall(raw: number): number {
 
 export const fmtPct = (f: number) => `${(f * 100).toFixed(2)}%`;
 
+/** The fall at the input's own precision: "3%", "3.25%", "2.6%". */
+export const fmtFall = (f: number) => `${Number((f * 100).toFixed(2))}%`;
+
 /** Signed dollars: a cost or loss is shown with a minus sign. */
 export const signedUsd = (n: number) => (Math.abs(n) < 0.005 ? "$0.00" : `${n < 0 ? "-" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 

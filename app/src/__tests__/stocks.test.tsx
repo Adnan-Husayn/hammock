@@ -22,7 +22,7 @@ describe("stock picker", () => {
     const group = screen.getByRole("group", { name: "Stock" });
     expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["NVDA", "TSLA", "SPY", "AAPL"]);
     await screen.findByText("NVDA: Buying now");
-    expect(screen.getByText("Your cover at a 3.00% fall")).toBeTruthy();
+    expect(screen.getByText("Your cover at a 3% fall")).toBeTruthy();
     await act(async () => fireEvent.click(within(group).getByRole("button", { name: "TSLA" })));
     await screen.findByText("TSLA: Buying now");
     expect(screen.getByText("TSLAx holding (USD)", { exact: false })).toBeTruthy();

@@ -32,7 +32,7 @@ export function phaseOf(m: MarketInfo | null, nowMs: number): Phase {
 }
 
 const COPY: Record<Phase, [string, string]> = {
-  none: ["No live {sym} market this weekend", "Try a demo replay or run a demo weekend."],
+  none: ["No live {sym} market this weekend", "Run a demo weekend or {replay}."],
   created: ["Waiting for the Friday afternoon mark", "Buying starts once it is final."],
   buying: ["Buying now", ""],
   locked: ["Locked", "Buying has ended. The payout is fixed at the Monday morning mark."],
@@ -79,7 +79,11 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
     <p className="status" data-testid="state-card" data-state={phase}>
       {certainty && <><StateTag kind={certainty} /> </>}
       <strong>{phase === "none" ? title : `${symbol}: ${title}`}</strong>.
-      {text && <> {text}</>}
+      {text && <> {text.includes("{replay}") ? <>{text.split("{replay}")[0]}<button className="link" data-testid="inspect-replay" onClick={() => {
+        const first = document.querySelector<HTMLButtonElement>("[data-replay-pill]");
+        first?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+        first?.focus();
+      }}>inspect a replay</button>{text.split("{replay}")[1]}</> : text}</>}
     </p>
   ) : null;
 
@@ -89,13 +93,13 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
         <span className="brand">{PRODUCT_NAME}</span>
         <div className="row picker" role="group" aria-label="Stock">
           {stocks.map((s) => (
-            <button key={s.symbol} className="pill" aria-pressed={s.symbol === symbol} onClick={() => { setSymbol(s.symbol); setMode("calc"); }}>
+            <button key={s.symbol} className={`pill${s.symbol === symbol ? " is-active" : ""}`} aria-pressed={s.symbol === symbol} onClick={() => { setSymbol(s.symbol); setMode("calc"); }}>
               {s.symbol}
             </button>
           ))}
-          <span className="badge env">Solana devnet, demo tokens</span>
         </div>
-        <div className="wallet-slot"><ThemeToggle />{walletButton}</div>
+        <div className="utils"><span className="badge env">Solana devnet, demo tokens</span><ThemeToggle /></div>
+        <div className="wallet-slot">{walletButton}</div>
       </header>
       <h1 className="hero">Keep the token. Know your loss on a 1% to 5% Monday fall.</h1>
       <p className="lead">If the Monday Pyth mark is more than 1% below Friday's, you are paid in USDC, rising to the full payout at a 5% fall.</p>
