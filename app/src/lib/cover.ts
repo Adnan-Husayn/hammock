@@ -77,7 +77,7 @@ export function whatNow(c: CoverRecord, extra: { buyBy?: string } = {}): string 
     case "Cover active":
       return demo
         ? `The Monday 09:30 ET mark decides the payout. ${DEMO_TIME_LABEL}: it lands in a few seconds.`
-        : `${extra.buyBy ? `Buying ends ${extra.buyBy} ET. ` : ""}The Monday 09:30 ET mark decides the payout.`;
+        : `${extra.buyBy ? `Buying ends ${extra.buyBy}. ` : ""}The Monday 09:30 ET mark decides the payout.`;
     case "Monday mark final":
       return demo ? `Claim the demo payout of ${fmtUsd(payout)}. No tokens move.` : `Claim ${fmtUsd(payout)} USDC to your wallet.`;
     case "Expired, no payout":
