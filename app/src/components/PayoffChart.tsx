@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import { DETENTS, FALL_MAX, fmtPct, lossLine, signedUsd, snapFall, stepFall, uncoveredLine, type LinePoint } from "../lib/line";
 import { fmtUsd, netLoss } from "../lib/program";
 
-const R = 20, T = 40, B = 64;
+const R = 20, T = 24, B = 64;
 
 /**
  * Net loss against Monday's fall, 0% to 8%. Loss is drawn downward, so the uncovered line keeps falling.
@@ -13,15 +13,21 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
 }) {
   const svg = useRef<SVGSVGElement>(null);
   const [W, setW] = useState(920);
+  const [room, setRoom] = useState(460); // height left on the first screen below the chart's top
   useEffect(() => {
     const el = svg.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(([e]) => { const w = Math.round(e.contentRect.width); if (w > 0) setW(w); });
+    const fit = () => setRoom(Math.round(window.innerHeight - (el.getBoundingClientRect().top + window.scrollY) - 12));
+    const ro = new ResizeObserver(([e]) => { const w = Math.round(e.contentRect.width); if (w > 0) setW(w); fit(); });
     ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener("resize", fit);
+    document.fonts?.ready.then(fit).catch(() => {});
+    const t = window.setTimeout(fit, 300);
+    return () => { ro.disconnect(); window.clearTimeout(t); window.removeEventListener("resize", fit); };
   }, []);
   const phone = W < 560;
-  const H = phone ? 380 : 460;
+  // Desktop: as tall as the first screen allows, so the whole chart fits without scrolling.
+  const H = phone ? 380 : Math.max(260, Math.min(460, room));
   const L = phone ? 58 : 76;
   const covered = lossLine(holding, contracts, premiumTotal);
   const bare = uncoveredLine(holding);
@@ -59,7 +65,7 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
     >
       <rect className="band" x={x(DETENTS[0])} y={T} width={x(DETENTS[1]) - x(DETENTS[0])} height={H - T - B} />
       {DETENTS.map((d) => <line key={d} className="band-rule" x1={x(d)} x2={x(d)} y1={T} y2={H - B} />)}
-      <text className="band-label" x={mid} y={T + 22} textAnchor="middle">1% to 5% band</text>
+      <text className="band-label" x={mid} y={H - B - (phone ? 52 : 10)} textAnchor="middle">1% to 5% band</text>
       <text className="detent-label" x={x(DETENTS[0]) + 6} y={H - B - (phone ? 30 : 10)}>{phone ? "Pays from 1%" : "Payout starts at 1%"}</text>
       <text className="detent-label" x={x(DETENTS[1]) - 6} y={H - B - 10} textAnchor="end">{phone ? "Full at 5%" : "Full payout at 5%"}</text>
       {yTicks.map((v) => (
@@ -72,7 +78,7 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
       <text className="axis axis-title" x={W - R} y={H - 10} textAnchor="end">Monday fall from the Friday mark</text>
       <path className="uncovered" d={path(bare)} data-testid="uncovered-line" />
       <path className="covered" d={path(covered)} data-testid="covered-line" />
-      {flat && <text className="flat-label" x={fall < (DETENTS[0] + DETENTS[1]) / 2 ? x(DETENTS[1]) - 8 : x(DETENTS[0]) + 8} y={y(l1) + 34} textAnchor={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "end" : "start"} data-testid="flat-label">{`flat at ${signedUsd(-l1)}`}</text>}
+      {flat && <text className="flat-label" x={fall < (DETENTS[0] + DETENTS[1]) / 2 ? x(DETENTS[1]) - 6 : x(DETENTS[0]) + 6} y={y(l1) - 22} textAnchor={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "end" : "start"} data-side={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "right" : "left"} data-testid="flat-label">{`flat at ${signedUsd(-l1)}`}</text>}
       <line className="marker-rule" x1={x(fall)} x2={x(fall)} y1={T} y2={H - B} />
       {onFall ? (
         <g

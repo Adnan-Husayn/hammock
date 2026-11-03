@@ -45,6 +45,8 @@ export function Calculator({ symbol, premiumPerContract, onContracts, status, li
         <span className={`badge${mode === "Verified replay" ? " badge-verified" : ""}`} data-testid="mode-badge">{mode}</span>
       </div>
       {status && <div className="status-line">{status}</div>}
+      <div className="deck">
+        <div className="deck-left">
       {replay ? (
         <div className="controls replay-controls">
           <p><strong>{replay.title}</strong>: {fmtUsd(holding)} of {token}, {contracts} contracts, a {fmtPct(fall)} fall.</p>
@@ -58,26 +60,32 @@ export function Calculator({ symbol, premiumPerContract, onContracts, status, li
           <label>Cover (contracts)
             <input type="number" min={0} step={10} value={contracts} data-testid="cover-input" onChange={(e) => setCustom(Math.max(0, Math.floor(Number(e.target.value))))} />
           </label>
+          <label className="fall-field">{symbol} fall by Monday (%)
+            <input type="number" min={0} max={8} step={0.25} value={Number((fall * 100).toFixed(2))} onChange={(e) => setFall(Math.min(0.08, Math.max(0, Number(e.target.value) / 100)))} />
+          </label>
           <p className="cover-reason">
             Suggested <span className="num" data-testid="contracts">{suggested}</span>, one contract per $25 of {token}
             {custom !== null && custom !== suggested && <> <button className="link" onClick={() => setCustom(null)}>Use suggested</button></>}
           </p>
-          <label className="fall-field">{symbol} fall by Monday (%)
-            <input type="number" min={0} max={8} step={0.25} value={Number((fall * 100).toFixed(2))} onChange={(e) => setFall(Math.min(0.08, Math.max(0, Number(e.target.value) / 100)))} />
-          </label>
         </div>
       )}
+        </div>
+        <div className="deck-right">
       <div className="figure">
         <p className="micro">Net loss at a {fmtPct(fall)} fall</p>
         <p className="big num loss" data-testid="net-loss">{fmtUsd(r.netLoss)}</p>
         <p className="compare" data-testid="uncovered">without cover {signedUsd(-r.holdingLoss)}</p>
       </div>
+        </div>
+      </div>
+      <div className="eqrow">
       <p className="equation num" data-testid="equation">{equationLine(r)}</p>
       <dl className="readout">
         <dt>Loss</dt><dd className="loss">{fmtUsd(r.holdingLoss)}</dd>
         <dt>Payout</dt><dd>{fmtUsd(r.payout)}</dd>
-        <dt>{sample ? "Premium (sample)" : "Premium"}</dt><dd>{fmtUsd(r.premium)}</dd>
+        <dt>{sample ? "Premium, sample until quoted" : "Premium"}</dt><dd>{fmtUsd(r.premium)}</dd>
       </dl>
+      </div>
       <PayoffChart holding={holding} contracts={contracts} premiumTotal={r.premium} fall={fall} onFall={replay ? undefined : setFall}
         label={`Net loss on a ${fmtUsd(holding)} ${token} holding with ${contracts} contracts, for a Monday fall from 0% to 8%`} />
       <ul className="legend">

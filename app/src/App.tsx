@@ -88,17 +88,15 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
     <main>
       <header className="top">
         <span className="brand">{PRODUCT_NAME}</span>
-        <div className="top-right">
-          <div className="row picker" role="group" aria-label="Stock">
-            {stocks.map((s) => (
-              <button key={s.symbol} className="pill" aria-pressed={s.symbol === symbol} onClick={() => { setSymbol(s.symbol); setReplay(null); }}>
-                {s.symbol}
-              </button>
-            ))}
-          </div>
+        <div className="row picker" role="group" aria-label="Stock">
+          {stocks.map((s) => (
+            <button key={s.symbol} className="pill" aria-pressed={s.symbol === symbol} onClick={() => { setSymbol(s.symbol); setReplay(null); }}>
+              {s.symbol}
+            </button>
+          ))}
           <span className="badge env">Solana devnet, demo tokens</span>
-          {walletButton}
         </div>
+        <div className="wallet-slot">{walletButton}</div>
       </header>
       <h1 className="hero">Hold your stock token through the weekend without carrying the whole fall.</h1>
       <p className="lead">If the Monday morning Pyth price is more than 1% below Friday afternoon's, you get paid in USDC, up to the full payout at a 5% fall.</p>
