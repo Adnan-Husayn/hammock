@@ -10,12 +10,14 @@ export const PHONE_TICKS = [0, 0.01, 0.03, 0.05, 0.08];
  * Net loss against Monday's fall, 0% to 8%. Loss is drawn downward, so the uncovered line keeps falling.
  * The viewBox follows the drawn width one to one, so text stays at its real size and the line never stretches.
  */
-export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, label, verified, estimateFall }: {
+export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, label, verified, estimateFall, markLabel }: {
   holding: number; contracts: number; premiumTotal: number; fall: number; onFall?: (f: number) => void; label: string;
   /** The measured fall from signed Pyth marks: the marker turns blue. */
   verified?: boolean;
   /** Weekend token move, drawn as a faint separate marker. It never moves the payout marker. */
   estimateFall?: number | null;
+  /** Fixed marker label once Monday is final, e.g. "Monday mark (demo) 3.00%". */
+  markLabel?: string;
 }) {
   const svg = useRef<SVGSVGElement>(null);
   const [W, setW] = useState(920);
@@ -61,6 +63,8 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
       onFall?.(next);
     }
   };
+  // Flip the settlement label to the left when it would run past the plot edge.
+  const markEnd = !!markLabel && x(fall) + 14 + markLabel.length * 7.6 > W - R;
   const mid = (x(DETENTS[0]) + x(DETENTS[1])) / 2;
 
   return (
@@ -72,8 +76,6 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
       <rect className="band" x={x(DETENTS[0])} y={T} width={x(DETENTS[1]) - x(DETENTS[0])} height={H - T - B} />
       {DETENTS.map((d) => <line key={d} className="band-rule" x1={x(d)} x2={x(d)} y1={T} y2={H - B} />)}
       <text className="band-label" x={mid} y={H - B - 10} textAnchor="middle">1% to 5% band</text>
-      {!phone && <text className="detent-label" x={x(DETENTS[0]) + 6} y={H - B - 10}>Payout starts at 1%</text>}
-      {!phone && <text className="detent-label" x={x(DETENTS[1]) - 6} y={H - B - 10} textAnchor="end">Full payout at 5%</text>}
       {yTicks.map((v) => (
         <g key={v}>
           <line className="grid" x1={L} x2={W - R} y1={y(v)} y2={y(v)} />
@@ -101,7 +103,11 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
           <circle r={28} cx={x(fall)} cy={y(here)} className="hit" />
           <circle r={11} cx={x(fall)} cy={y(here)} className="dot" />
         </g>
-      ) : <circle r={10} cx={x(fall)} cy={y(here)} className={verified ? "dot dot-verified" : "dot"} data-testid="fall-marker" data-verified={verified ? "true" : "false"} />}
+      ) : <circle r={10} cx={x(fall)} cy={y(here)} className={verified ? "dot dot-verified" : markLabel ? "dot dot-mark" : "dot"} data-testid="fall-marker" data-verified={verified ? "true" : "false"} />}
+      {markLabel && !onFall && (
+        <text className={`mark-label${verified ? " is-verified" : ""}`} data-testid="mark-label" x={x(fall) + (markEnd ? -14 : 14)} y={y(here) + 30}
+          textAnchor={markEnd ? "end" : "start"}>{markLabel}</text>
+      )}
     </svg>
   );
 }

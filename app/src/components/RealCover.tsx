@@ -32,6 +32,7 @@ export function realRecord(market: PublicKey, symbol: string, info: MarketInfo, 
     status: realStatus(info, position),
     payoutPerContract: info.state === "MondayFinal" ? usdc(info.payoutPerContract) : undefined,
     verified,
+    refunded: info.state === "Voided" && position.closed,
   };
 }
 
