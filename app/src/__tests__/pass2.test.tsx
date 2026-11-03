@@ -97,12 +97,23 @@ describe("pass 3", () => {
   });
   it("labels the sample premium quietly and keeps the fall field in the control strip", () => {
     const { container } = render(<Calculator symbol="NVDA" />);
-    expect(screen.getByText("Premium, sample until quoted", { selector: "dt" })).toBeTruthy();
+    expect(screen.getByText("Premium (sample)", { selector: "dt" })).toBeTruthy();
     expect(container.querySelectorAll(".controls > label").length).toBe(3);
   });
   it("keeps the stock pills and the devnet pill in one group in the header", async () => {
     render(<App deps={deps({ market: null })} />);
     await screen.findByTestId("state-card");
     expect(within(screen.getByRole("group", { name: "Stock" })).getByText("Solana devnet, demo tokens")).toBeTruthy();
+  });
+});
+
+describe("figures", () => {
+  it("never wrap mid-number", () => {
+    const { container } = render(<Calculator symbol="NVDA" />);
+    const dds = container.querySelectorAll(".readout dd");
+    expect(dds.length).toBe(3);
+    for (const d of dds) expect(d.classList.contains("fig")).toBe(true);
+    expect(screen.getByTestId("net-loss").classList.contains("fig")).toBe(true);
+    expect(css).toMatch(/\.fig\s*\{\s*white-space:nowrap/);
   });
 });

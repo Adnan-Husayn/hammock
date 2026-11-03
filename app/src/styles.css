@@ -99,6 +99,8 @@ footer { margin-top:24px; }
 .eqrow .readout { margin:0; gap:0 14px; }
 .eqrow .readout dt { white-space:nowrap; }
 .eqrow .readout dd { font-size:1rem; }
+.fig { white-space:nowrap; }
+@media (max-width:400px) { .eqrow .readout { gap:0 10px; } .eqrow .readout dd { font-size:.95rem; } }
 .controls { display:flex; flex-wrap:wrap; align-items:flex-end; gap:6px 12px; margin-bottom:4px; }
 .controls label { font:600 11px var(--grot); text-transform:uppercase; letter-spacing:.06em; }
 .controls label { flex:1 1 0; white-space:nowrap; }
@@ -182,3 +184,4 @@ button.ghost { min-height:40px; }
   .strip-text { max-width:none; }
   .strip .steps { flex-wrap:wrap; }
 }
+@media (max-width:385px) { .top .picker { flex-wrap:wrap; } }

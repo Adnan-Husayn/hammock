@@ -73,17 +73,17 @@ export function Calculator({ symbol, premiumPerContract, onContracts, status, li
         <div className="deck-right">
       <div className="figure">
         <p className="micro">Net loss at a {fmtPct(fall)} fall</p>
-        <p className="big num loss" data-testid="net-loss">{fmtUsd(r.netLoss)}</p>
-        <p className="compare" data-testid="uncovered">without cover {signedUsd(-r.holdingLoss)}</p>
+        <p className="big num fig loss" data-testid="net-loss">{fmtUsd(r.netLoss)}</p>
+        <p className="compare fig" data-testid="uncovered">without cover {signedUsd(-r.holdingLoss)}</p>
       </div>
         </div>
       </div>
       <div className="eqrow">
       <p className="equation num" data-testid="equation">{equationLine(r)}</p>
       <dl className="readout">
-        <dt>Loss</dt><dd className="loss">{fmtUsd(r.holdingLoss)}</dd>
-        <dt>Payout</dt><dd>{fmtUsd(r.payout)}</dd>
-        <dt>{sample ? "Premium, sample until quoted" : "Premium"}</dt><dd>{fmtUsd(r.premium)}</dd>
+        <dt>Loss</dt><dd className="fig loss">{fmtUsd(r.holdingLoss)}</dd>
+        <dt>Payout</dt><dd className="fig">{fmtUsd(r.payout)}</dd>
+        <dt>{sample ? "Premium (sample)" : "Premium"}</dt><dd className="fig">{fmtUsd(r.premium)}</dd>
       </dl>
       </div>
       <PayoffChart holding={holding} contracts={contracts} premiumTotal={r.premium} fall={fall} onFall={replay ? undefined : setFall}
