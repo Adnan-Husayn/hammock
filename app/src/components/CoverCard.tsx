@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { fmtUsd } from "../lib/program";
 import { tokenName } from "../lib/markets";
-import { bandSlope, fmtFall, PARTIAL_COVER_LABEL, signedUsd } from "../lib/line";
+import { bandSlope, fmtFall, fmtPct, PARTIAL_COVER_LABEL, signedUsd } from "../lib/line";
 import { PRODUCT_NAME } from "../brand";
 import {
-  coverFall, coverNumbers, DEMO_LABEL, fmtEtDay, measured, receiptText, SIZED_NOTE, sumLine, WEEKEND_NOTE, whatNow, type CoverRecord,
+  coverFall, coverNumbers, DEMO_LABEL, DEMO_TIME_LABEL, fmtEtDay, measured, receiptText, SIZED_NOTE, sumLine, WEEKEND_NOTE, whatNow, type CoverRecord,
 } from "../lib/cover";
 import { PayoffChart } from "./PayoffChart";
 
@@ -67,18 +67,21 @@ export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPri
       {c.kind === "demo" && !preview && <p className="demo-label" data-testid="demo-label">{DEMO_LABEL}</p>}
       {compressed}
 
-      <dl className="facts">
+      <dl className="facts facts-terms">
         <div><dt>Contracts</dt><dd className="num">{c.contracts}</dd></div>
         <div><dt>Premium</dt><dd className="num">{fmtUsd(c.premium)}</dd></div>
         <div><dt>Payout cap</dt><dd className="num">{fmtUsd(c.contracts)}</dd></div>
+      </dl>
+      <dl className="facts facts-marks" data-testid="marks">
         <div><dt>Friday mark</dt><dd className="num">{c.fridayPrice === null ? "Not yet" : fmtUsd(c.fridayPrice)}{c.fridayAt && <span className="when">{fmtEtDay(c.fridayAt)}</span>}</dd></div>
         <div><dt>Monday mark</dt><dd className="num">{c.mondayPrice === null ? "Not yet" : fmtUsd(c.mondayPrice)}{c.mondayAt && <span className="when">{fmtEtDay(c.mondayAt)}</span>}</dd></div>
+        {c.kind === "demo" && <p className="marks-note"><span className="badge">{DEMO_TIME_LABEL}</span></p>}
       </dl>
 
       <p className="what-now" data-testid="what-now"><span className="micro">What happens now?</span> {preview ? "Nothing is bought. Run a demo weekend to see the whole cycle." : whatNow(c, { buyBy })}</p>
 
       {voided ? (
-        <p className="void-line" data-testid="void-line">Void: no Monday mark, so there is no fall to measure. Premium {fmtUsd(c.premium)} returns as a refund.</p>
+        <p className="void-line" data-testid="void-line">Void: no Monday mark, so there is no fall to measure. {c.refunded ? `Refunded: premium ${fmtUsd(c.premium)}.` : `Premium ${fmtUsd(c.premium)} can be refunded.`}</p>
       ) : (
         <>
           <div className="figure">
@@ -97,7 +100,7 @@ export function CoverCard({ c, preview, holdingLabel, actions, proof, weekendPri
           )}
           <p className="sum-line num" data-testid="sum-line">{sumLine(r)}</p>
           <PayoffChart holding={c.holding} contracts={c.contracts} premiumTotal={r.premium} fall={fall}
-            onFall={settled ? undefined : setPreviewFall} verified={settled && !!c.verified} estimateFall={estimateFall}
+            onFall={settled ? undefined : setPreviewFall} verified={settled && !!c.verified} markLabel={settled ? `Monday mark${c.kind === "demo" ? " (demo)" : ""} ${fmtPct(fall)}` : undefined} estimateFall={estimateFall}
             label={`Net loss on ${fmtUsd(c.holding)} of ${token} with ${c.contracts} contracts, for a Monday fall from 0% to 8%`} />
           <ul className="legend">
             <li><span className="key key-covered" /> With cover, after payout and premium</li>

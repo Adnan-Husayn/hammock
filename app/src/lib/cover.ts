@@ -26,6 +26,8 @@ export type CoverRecord = {
   payoutPerContract?: number;
   /** Signed Pyth marks matched against the archive. Only then is the marker blue. */
   verified?: boolean;
+  /** Voided and the premium already returned. */
+  refunded?: boolean;
 };
 
 /** Demo weekend: $5,000 of the token, 200 contracts, a 3% fall from $180.00 to $174.60. Made-up prices. */
@@ -85,7 +87,7 @@ export function whatNow(c: CoverRecord, extra: { buyBy?: string } = {}): string 
     case "Claimed":
       return demo ? `Done. Demo payout of ${fmtUsd(payout)} recorded, no tokens moved.` : `Done. ${fmtUsd(payout)} USDC sent to your wallet.`;
     case "Voided":
-      return "No Monday mark met the rules. The premium comes back as a refund.";
+      return c.refunded ? `Refunded. ${fmtUsd(c.premium)} USDC premium returned to your wallet.` : "No Monday mark met the rules. Take a refund of the premium below.";
   }
 }
 
@@ -143,10 +145,9 @@ export function nextWeekend(nowMs: number) {
   return weekendOf(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
 }
 
-/** The weekend before the next one, for a demo run. Computed on the calendar so a clock change cannot shift it. */
+/** A demo run plays the upcoming weekend in compressed time, so its dates match the preview. */
 export function demoWeekend(nowMs: number) {
-  const day = fridayDates(nowMs);
-  const w = weekendOf(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() - 7);
+  const w = nextWeekend(nowMs);
   return { friday: w.friday, monday: w.monday };
 }
 
