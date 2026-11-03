@@ -22,7 +22,7 @@ export function Settle({ deps, market, info, onSent }: { deps: AppDeps; market: 
         const c = { programId: deps.programId, market, info, user: w.publicKey, feePayer, blockhash };
         return voided ? buildRefundTx(c) : buildClaimTx(c);
       }, info.sandbox);
-      setStatus(`${fmtUsd(amount)} sent to your wallet.`);
+      setStatus(`${fmtUsd(amount)} USDC sent to your wallet.`);
       onSent?.(sig);
       load();
     } catch (e) {
@@ -34,7 +34,7 @@ export function Settle({ deps, market, info, onSent }: { deps: AppDeps; market: 
   return (
     <div className="settle">
       {status && <p>{status}</p>}
-      <button className="primary" disabled={busy} onClick={act}>{voided ? `Refund ${fmtUsd(amount)}` : `Claim ${fmtUsd(amount)}`}</button>
+      <button className="primary" disabled={busy} onClick={act}>{voided ? `Refund ${fmtUsd(amount)} USDC` : `Claim ${fmtUsd(amount)} USDC`}</button>
     </div>
   );
 }

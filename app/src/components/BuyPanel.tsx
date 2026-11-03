@@ -8,8 +8,10 @@ export const QUOTE_REFRESH_MS = 60_000;
 /** Refresh this long before expiry, and refuse to buy inside it, so a signature cannot land on a dead quote. */
 export const QUOTE_MARGIN_MS = 10_000;
 
-export function BuyPanel({ deps, market, info, contracts, onBought, onQuote, balanceNonce }: {
+export function BuyPanel({ deps, market, info, contracts, onBought, onQuote, balanceNonce, embedded }: {
   deps: AppDeps; market: PublicKey; info: MarketInfo; contracts: number; onBought?: () => void; onQuote?: (premiumPerContract: number) => void; balanceNonce?: number;
+  /** Inside the Review & confirm step: no card of its own, and the button confirms. */
+  embedded?: boolean;
 }) {
   const [quote, setQuote] = useState<QuoteJson | null>(null);
   const [balance, setBalance] = useState<bigint | null>(null);
@@ -74,10 +76,11 @@ export function BuyPanel({ deps, market, info, contracts, onBought, onQuote, bal
     }
   };
 
-  if (!wallet) return <section className="card"><h2>Buy cover</h2><p>Connect a wallet to get a quote.</p></section>;
+  const Wrap = embedded ? "div" : "section";
+  if (!wallet) return <Wrap className={embedded ? "buy-live" : "card"}>{!embedded && <h2>Buy cover</h2>}<p>Connect a wallet to get a quote.</p></Wrap>;
   return (
-    <section className="card">
-      <h2>Buy cover</h2>
+    <Wrap className={embedded ? "buy-live" : "card"}>
+      {!embedded && <h2>Buy cover</h2>}
       {quote && (
         <dl>
           <dt>Premium per contract</dt><dd>{usdc(BigInt(quote.premiumPerContract)).toFixed(6)} USDC</dd>
@@ -91,7 +94,7 @@ export function BuyPanel({ deps, market, info, contracts, onBought, onQuote, bal
       {expiring && <p className="note">Refreshing the quote</p>}
       {short && <p className="warn">Not enough USDC</p>}
       {error && <p className="warn">{error}</p>}
-      <button className="primary" disabled={!quote || short || busy || expiring} onClick={buy}>{busy ? "Waiting for wallet" : `Buy ${contracts} contracts`}</button>
-    </section>
+      <button className="primary" data-testid="confirm-buy" disabled={!quote || short || busy || expiring} onClick={buy}>{busy ? "Approve in your wallet" : embedded ? `Confirm and buy ${contracts} contracts` : `Buy ${contracts} contracts`}</button>
+    </Wrap>
   );
 }
