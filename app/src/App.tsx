@@ -183,7 +183,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
       {onLanding && (
         <section className="landing" data-testid="landing">
           <span className="kicker">Weekend gap cover</span>
-          <h1 className="hero">{headline}</h1>
+          <h1 className="hero swap" key={`h-${symbol}`}>{headline}</h1>
           <p className="lead" data-testid="market-closed">Stock market closed for 65h 30m. Token still trades. A Monday mark over 1% below Friday's pays you in USDC, up to {fmtUsd(contracts).replace(/\.00$/, "")}.</p>
           <div className="row actions">
             <button className="primary" data-testid="run-demo" onClick={startDemo}>Run a demo weekend</button>
@@ -210,7 +210,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
       {demo && !(flow?.kind === "demo") && (
         <CoverCard key={demo.id} c={demo} holdingLabel="Demo holding" actions={demoActions} compressed={compressed} />
       )}
-      {(onLanding || flow) && <CoverCard key="preview" c={preview} preview holdingLabel={holdingLabel} onRunDemo={startDemo}
+      {(onLanding || flow) && <CoverCard key={`preview-${symbol}`} c={preview} preview holdingLabel={holdingLabel} onRunDemo={startDemo}
         body={flow ? (
         <BuyFlow step={flow.step} kind={flow.kind} stocks={stocks} symbol={symbol} onSymbol={pickStock}
           holding={holding} onHolding={setHolding} contracts={contracts} onContracts={setCustom}
@@ -229,7 +229,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
       <section className="card how" id="how" data-testid="how">
         <div className="card-head">
           <h2>How cover works</h2>
-          <button className="link" aria-expanded={howOpen} onClick={() => setHowOpen((v) => !v)}>{howOpen ? "Hide" : "Show"}</button>
+          <button className="toggle" aria-expanded={howOpen} onClick={() => setHowOpen((v) => !v)}>{howOpen ? "Hide details" : "Show details"}<svg className="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
         </div>
         <dl className="mechanics">
           <div><dt>Marks</dt><dd>The payout compares the Friday 16:00 ET mark with the Monday 09:30 ET mark.</dd></div>
@@ -238,17 +238,26 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
           <div><dt>Size</dt><dd>One contract per $25 of the token keeps net loss flat across the band.</dd></div>
         </dl>
         {howOpen && (
-          <>
+          <div className="reveal">
             {info && <PriceTracks deps={deps} info={info} symbol={symbol} />}
             <Replays deps={deps} />
             <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} />
             {sandbox ? <Sandbox key={symbol} deps={deps} symbol={symbol} /> : (
               <p className="note"><button className="link" onClick={() => setSandbox(true)}>Sandbox with step-by-step controls</button></p>
             )}
-          </>
+          </div>
         )}
       </section>
-      <footer className="note">Devnet only. Pyth marks decide payouts. Token prices and demo prices do not.</footer>
+      <footer className="site-foot">
+        <div className="foot-brand"><span className="brand"><Glyph />{PRODUCT_NAME}</span>
+          <p className="note">Weekend gap cover for tokenised stocks. Devnet only, demo funds. Pyth marks decide payouts. Token prices and demo prices do not.</p></div>
+        <div className="foot-meta">
+          <p>Built by <strong>Adnan Husayn</strong></p>
+          <a className="foot-link" href="https://github.com/Adnan-Husayn" target="_blank" rel="noreferrer">
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+            github.com/Adnan-Husayn</a>
+        </div>
+      </footer>
     </main>
   );
 }

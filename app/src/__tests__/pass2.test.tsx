@@ -36,7 +36,7 @@ describe("page", () => {
   it("shows the name from one constant, the headline and no semicolons or open", async () => {
     const { container } = render(<App deps={deps({ market: market() })} />);
     await screen.findByTestId("state-card");
-    expect(screen.getByText(PRODUCT_NAME)).toBeTruthy();
+    expect(screen.getAllByText(PRODUCT_NAME).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("You hold $5,000 of NVDAx.");
     expect(screen.getByText("Solana devnet, demo tokens")).toBeTruthy();
     expect(container.textContent).not.toMatch(/;|gasless|30 seconds/i);
