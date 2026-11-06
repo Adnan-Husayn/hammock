@@ -10,7 +10,6 @@ import { RealCover } from "./components/RealCover";
 import { DEMO_REPLAYS, DemoReceipt, Replays, type DemoId } from "./components/Replays";
 import { QuickWeekend, Sandbox } from "./components/Sandbox";
 import { StateTag, type Certainty } from "./components/StateTag";
-import { ThemeToggle } from "./components/ThemeToggle";
 import { PRODUCT_NAME } from "./brand";
 import { enabledStocks } from "./lib/markets";
 import { SAMPLE_PREMIUM } from "./lib/line";
@@ -48,6 +47,17 @@ const COPY: Record<Phase, [string, string]> = {
 const CERTAINTY: Record<Phase, Certainty | null> = { none: null, created: "observed", buying: "estimate", locked: "estimate", settled: "final", voided: "final" };
 
 export { DEMO_WEEKEND_MS };
+
+/** The mark: two posts and the line slung between them. */
+function Glyph() {
+  return (
+    <svg className="glyph" width="36" height="24" viewBox="0 0 36 24" aria-hidden="true" focusable="false">
+      <path d="M4 2.5 V21.5 M32 2.5 V21.5" stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="round" fill="none" />
+      <path d="M4 5.5 Q18 23 32 5.5" stroke="var(--signal)" strokeWidth="2.6" strokeLinecap="round" fill="none" />
+      <circle cx="18" cy="16.4" r="3.1" fill="var(--signal)" stroke="var(--ground)" strokeWidth="1.8" />
+    </svg>
+  );
+}
 
 type Flow = { kind: "demo" | "real"; step: BuyStep };
 
@@ -144,7 +154,8 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
   };
   const holdingLabel = deps.wallet ? "Your holding" : "Demo holding";
   const onLanding = !flow && !demo && !real;
-  const headline = `Know your ${symbol}x loss on a 1% to 5% Monday fall.`;
+  const holdingText = fmtUsd(holding).replace(/\.00$/, "");
+  const headline = <>You hold <span className="money">{holdingText}</span> of {symbol}x.</>;
 
   const demoActions = demo?.status === "Monday mark final"
     ? <button className="primary" data-testid="claim" onClick={() => record({ ...demo, status: "Claimed" })}>Claim {fmtUsd(payoutFor(demo))} USDC</button>
@@ -157,7 +168,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
   return (
     <main>
       <header className="top">
-        <span className="brand">{PRODUCT_NAME}</span>
+        <span className="brand"><Glyph />{PRODUCT_NAME}</span>
         <div className="row picker" role="group" aria-label="Stock">
           {stocks.map((s) => (
             <button key={s.symbol} className={`pill${s.symbol === symbol ? " is-active" : ""}`} aria-pressed={s.symbol === symbol} onClick={() => pickStock(s.symbol)}>
@@ -165,17 +176,18 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
             </button>
           ))}
         </div>
-        <div className="utils"><span className="badge env">Solana devnet, demo tokens</span><ThemeToggle /></div>
+        <div className="utils"><span className="badge env">Solana devnet, demo tokens</span></div>
         <div className="wallet-slot">{walletButton}</div>
       </header>
 
       {onLanding && (
         <section className="landing" data-testid="landing">
+          <span className="kicker">Weekend gap cover</span>
           <h1 className="hero">{headline}</h1>
-          <p className="lead" data-testid="market-closed">Stock market closed for 65h 30m. Token still trades.</p>
+          <p className="lead" data-testid="market-closed">Stock market closed for 65h 30m. Token still trades. A Monday mark over 1% below Friday's pays you in USDC, up to {fmtUsd(contracts).replace(/\.00$/, "")}.</p>
           <div className="row actions">
             <button className="primary" data-testid="run-demo" onClick={startDemo}>Run a demo weekend</button>
-            <button data-testid="see-how" onClick={showHow}>See how cover works</button>
+            <button className="quiet" data-testid="see-how" onClick={showHow}>See how cover works</button>
           </div>
         </section>
       )}

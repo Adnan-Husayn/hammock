@@ -7,10 +7,9 @@ import { isActive, totals } from "../lib/ledger";
 function Row({ c }: { c: CoverRecord }) {
   return (
     <li className="ledger-row" data-testid="ledger-row" data-status={c.status}>
-      <span className="ledger-what">{tokenName(c.symbol)}, {c.contracts} contracts{c.kind === "demo" && <span className="badge">Demo</span>}</span>
-      <span className="ledger-when">{c.fridayAt ? `Friday mark ${fmtEtDay(c.fridayAt)}` : ""}</span>
-      <span className="ledger-status">{statusLabel(c)}</span>
-      <span className="ledger-fig num fig">premium {fmtUsd(c.premium)}{c.status === "Claimed" && <>, payout {fmtUsd(payoutFor(c))}</>}</span>
+      <span className="ledger-when">{c.fridayAt ? fmtEtDay(c.fridayAt) : ""}</span>
+      <span className="ledger-what">{tokenName(c.symbol)}, {c.contracts} contracts, premium {fmtUsd(c.premium)}{c.status === "Claimed" && <>, payout {fmtUsd(payoutFor(c))}</>}{c.kind === "demo" && <span className="badge">Demo</span>}</span>
+      <span className={`ledger-status tag-${c.status.split(/[ ,]/)[0].toLowerCase()}`}>{statusLabel(c)}</span>
     </li>
   );
 }
@@ -36,7 +35,7 @@ export function Ledger({ list, nextFriday, buyBy, onCoverNext }: { list: CoverRe
   const active = list.filter(isActive), past = list.filter((c) => !isActive(c));
   return (
     <section className="card ledger" data-testid="ledger">
-      <h2>Ledger</h2>
+      <h2>Your weekends so far</h2>
       {active.length > 0 && <><h3>Active</h3><ul className="ledger-list">{active.map((c) => <Row key={c.id} c={c} />)}</ul></>}
       {past.length > 0 && <><h3>Past</h3><ul className="ledger-list">{past.map((c) => <Row key={c.id} c={c} />)}</ul></>}
       <div className="ledger-sums">

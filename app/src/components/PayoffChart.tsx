@@ -35,7 +35,7 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
   }, []);
   const phone = W < 560;
   // Desktop: as tall as the first screen allows, so the whole chart fits without scrolling.
-  const H = phone ? 380 : W >= 860 ? Math.max(400, Math.min(520, room)) : Math.max(260, Math.min(460, room));
+  const H = phone ? 260 : Math.max(260, Math.min(320, room));
   const L = phone ? 58 : 76;
   const covered = lossLine(holding, contracts, premiumTotal);
   const bare = uncoveredLine(holding);
@@ -86,7 +86,7 @@ export function PayoffChart({ holding, contracts, premiumTotal, fall, onFall, la
       <text className="axis axis-title" x={W - R} y={H - 10} textAnchor="end">Monday fall from the Friday mark</text>
       <path className="uncovered" d={path(bare)} data-testid="uncovered-line" />
       <path className="covered" d={path(covered)} data-testid="covered-line" />
-      {flat && <text className="flat-label" x={fall < (DETENTS[0] + DETENTS[1]) / 2 ? x(DETENTS[1]) - 6 : x(DETENTS[0]) + 6} y={y(l1) - 22} textAnchor={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "end" : "start"} data-side={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "right" : "left"} data-testid="flat-label">{`flat at ${signedUsd(-l1)}`}</text>}
+      {flat && <text className="flat-label" x={fall < (DETENTS[0] + DETENTS[1]) / 2 ? x(DETENTS[1]) - 6 : x(DETENTS[0]) + 6} y={phone ? y(l1) + 30 : y(l1) - 22} textAnchor={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "end" : "start"} data-side={fall < (DETENTS[0] + DETENTS[1]) / 2 ? "right" : "left"} data-testid="flat-label">{`Net loss fixed at ${signedUsd(-l1)}`}</text>}
       {estimateFall != null && estimateFall >= 0 && estimateFall <= FALL_MAX && (
         <g className="estimate-marker" data-testid="estimate-marker">
           <line x1={x(estimateFall)} x2={x(estimateFall)} y1={T} y2={H - B} />

@@ -37,7 +37,7 @@ describe("page", () => {
     const { container } = render(<App deps={deps({ market: market() })} />);
     await screen.findByTestId("state-card");
     expect(screen.getByText(PRODUCT_NAME)).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Know your NVDAx loss on a 1% to 5% Monday fall.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("You hold $5,000 of NVDAx.");
     expect(screen.getByText("Solana devnet, demo tokens")).toBeTruthy();
     expect(container.textContent).not.toMatch(/;|gasless|30 seconds/i);
     expect(container.textContent).not.toMatch(OPEN);
@@ -66,7 +66,7 @@ describe("page", () => {
   it("keeps the stock pills and the devnet pill apart in the header", async () => {
     render(<App deps={deps({ market: null })} />);
     const env = screen.getByText("Solana devnet, demo tokens");
-    expect(env.parentElement).toBe(screen.getByTestId("theme-toggle").parentElement);
+    expect(env.parentElement!.className).toBe("utils");
     expect(env.parentElement!.contains(screen.getByRole("group", { name: "Stock" }))).toBe(false);
   });
 
@@ -94,23 +94,9 @@ describe("palette and figures", () => {
     expect(css).toMatch(/\.fig\s*\{\s*white-space:nowrap/);
     expect(PHONE_TICKS).toEqual(expect.arrayContaining([0.01, 0.05]));
   });
-  it("cycles system, light, dark and remembers the choice", async () => {
-    const m = new Map<string, string>();
-    vi.stubGlobal("localStorage", { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
-    document.documentElement.removeAttribute("data-theme");
+  it("is one dark product with no theme switch", () => {
     render(<App deps={deps({ market: null })} />);
-    const b = screen.getByTestId("theme-toggle");
-    expect(b.getAttribute("data-theme-choice")).toBe("system");
-    expect(b.textContent).toBe(" Theme: Auto");
-    fireEvent.click(b);
-    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    expect(localStorage.getItem("theme")).toBe("light");
-    fireEvent.click(b);
-    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-    fireEvent.click(b);
-    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
-    expect(localStorage.getItem("theme")).toBeNull();
-    expect(css).toMatch(/:root\[data-theme="dark"\]/);
-    vi.unstubAllGlobals();
+    expect(screen.queryByTestId("theme-toggle")).toBeNull();
+    expect(css).toMatch(/color-scheme:dark/);
   });
 });

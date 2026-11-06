@@ -68,7 +68,7 @@ describe("landing", () => {
     expect(screen.getByTestId("buy-flow").getAttribute("data-step")).toBe("choose");
     await click(screen.getByRole("button", { name: "Cancel" }));
     const landing = screen.getByTestId("landing");
-    expect(screen.getByTestId("market-closed").textContent).toBe("Stock market closed for 65h 30m. Token still trades.");
+    expect(screen.getByTestId("market-closed").textContent).toBe("Stock market closed for 65h 30m. Token still trades. A Monday mark over 1% below Friday's pays you in USDC, up to $200.");
     expect(within(landing).getAllByRole("button").map((b) => b.textContent)).toEqual(["Run a demo weekend", "See how cover works"]);
     expect(container.querySelectorAll("input").length).toBe(0);
     expect(screen.queryByTestId("ledger")).toBeNull();
@@ -115,7 +115,8 @@ describe("settlement in place", () => {
     await click(screen.getByTestId("skip-monday"));
     expect(screen.getByTestId("cover-card")).toBe(card);
     expect(card.getAttribute("data-status")).toBe("Monday mark final");
-    expect(within(card).getByTestId("settled-lines").textContent).toBe("Fall3%Payout$100.00Premium-$23.91");
+    expect(within(card).getByTestId("settled-lines").textContent).toBe("Monday fall -3%");
+    expect(within(card).getByTestId("sum-line").textContent).toBe("stock -$150.00 + payout +$100.00 - premium $23.91 = net -$73.91");
     expect(within(card).getByTestId("net-loss").textContent).toBe("-$73.91");
     expect(within(card).getByTestId("uncovered").textContent).toBe("without cover -$150.00");
     const primaries = card.querySelectorAll("button.primary");
