@@ -1,93 +1,92 @@
-# Monday Gap Cover
+# Hammock
 
-Solana program (Anchor 0.30.1) plus a TypeScript test harness.
+Weekend gap cover for tokenised stocks on Solana.
 
-## Build and test
+The US stock market closes at 16:00 ET on Friday and opens at 09:30 ET on Monday. Tokenised stocks such as NVDAx keep trading all weekend, but the price that matters for a holder is where the real stock opens on Monday. Hammock lets a holder buy cover before the weekend. If the stock opens Monday more than 1% below Friday's close, Hammock pays out in USDC.
+
+Built for the Solana Foundation Perps and Prediction Markets hackathon. Runs on devnet with demo USDC and test tokens.
+
+## How the cover works
+
+Each contract pays from $0 to $1, set by how far the stock falls between two signed Pyth prices: the Friday close mark and the Monday open mark.
+
+    payout per contract = clamp((fall - 1%) / 4%, 0, 1)
+
+- A fall of 1% or less pays nothing.
+- Between 1% and 5% the payout rises in a straight line.
+- At 5% and beyond it pays the full $1.
+
+Buy one contract for every $25 of the token you hold and your net loss stays flat across the whole 1% to 5% range. Drawn on a chart, that flat stretch between two posts looks like a hammock, which is where the name comes from.
+
+Example: $5,000 of NVDAx, 200 contracts, $23.91 premium.
+
+| Monday fall | Loss without cover | Payout | Net loss with cover |
+|---|---|---|---|
+| 0% | $0.00 | $0.00 | -$23.91 |
+| 1% | -$50.00 | $0.00 | -$73.91 |
+| 3% | -$150.00 | +$100.00 | -$73.91 |
+| 5% | -$250.00 | +$200.00 | -$73.91 |
+| 8% | -$400.00 | +$200.00 | -$223.91 |
+
+More than one contract per $25 makes the line tilt upward through the band. That turns cover into a bet on the fall, and the app says so.
+
+## Settlement
+
+Prices come from Pyth Pro (Lazer) signed reports. The program verifies each report on chain through the Pyth Lazer verifier and the Ed25519 precompile, and it only accepts a report that is:
+
+- for the market's own feed (NVDA is feed 1314),
+- close to the target time (Friday 15:59:30 ET, Monday 09:31:30 ET),
+- under the market's confidence cap and above its minimum publisher count.
+
+Anyone can submit a report and earn a small bounty. A closer report replaces a farther one. If no valid Monday report arrives, or the token's share multiplier changes over the weekend, the market voids and buyers can take their premium back.
+
+## What is in the repo
+
+| Path | What it is |
+|---|---|
+| `programs/gap_cover` | Anchor program: create market, buy with a dealer-signed quote, record the Friday and Monday marks, claim, refund, void |
+| `service` | Dealer service: quotes, a keeper that submits Pyth reports, a fee-payer relay for the sandbox, a devnet faucet |
+| `app` | React app: stock picker, demo weekend, cover card with the payoff chart, claim, receipts, history |
+| `tests` | Program tests on LiteSVM with real Pyth fixtures and signature checks switched on |
+| `scripts` | Market creation, test mints, devnet deploy, and a logger that records real Pyth marks every weekday |
+| `docs` | Design notes, deploy guide and [development notes](docs/development.md) |
+
+Program id on devnet: `HzYCke4ESM4ripYknCuGu3Bk9XU3xRTmBoYkHaESMG9g`
+
+Stocks: NVDA, TSLA, SPY and AAPL are on. GOOGL, MSFT, META, QQQ and AMZN are configured and off until their price data checks out.
+
+## Try it
+
+The app runs a full demo weekend without a wallet: buy cover, watch the Friday and Monday marks land, then claim. Demo results are labelled as demo and never shown as signed prices. With a devnet wallet, the sandbox runs a real market end to end, with fees paid by the relay.
+
+## Run it locally
+
+Program and tests:
 
     npm install
-    npm run build        # cargo-build-sbf -> target/deploy/gap_cover.so
-    npm test             # vitest, harness in tests/harness.ts
+    npm run build      # cargo-build-sbf, output in target/deploy/gap_cover.so
+    npm test
 
-`npm run dump:lazer` refreshes the devnet dumps in `fixtures/` (Pyth Lazer verifier
-program, its storage and treasury accounts, and Token-2022).
+App:
 
-## Harness choice: LiteSVM
+    cd app
+    npm install
+    npm run dev
 
-The harness runs on `litesvm` 0.3.3 (the last line that takes `@solana/web3.js` v1 types).
+Service:
 
-`solana-bankrun` was tried first. It loads fine under Node 25, but it does not execute the
-Ed25519 precompile: a transaction carrying an Ed25519 instruction with a garbage signature
-succeeds. The Lazer verifier relies on that precompile, so under bankrun a tampered price
-message would be "verified". Switching Node versions would not change this, so the harness
-went straight to LiteSVM with `withSigverify(true).withPrecompiles()`, where the same forged
-signature is rejected.
+    cd service
+    npm install
+    npm test
 
-Other notes:
+The service needs keypair files and settings described in [docs/deploy-service.md](docs/deploy-service.md). Toolchain pins, the reason for LiteSVM over bankrun, and the full service reference are in [docs/development.md](docs/development.md).
 
-- The harness loads the devnet dump of Token-2022 (`fixtures/token2022.so`) over LiteSVM's
-  bundled copy so ScaledUiAmount behaves as on the live cluster.
-- The clock starts at the Pyth fixture time (29 Oct 2026). The Lazer storage account holds
-  trusted signers with expiry timestamps; `warpTo` moves the clock when a test needs it.
-- The treasury account is loaded with 10,000,000 lamports; the verifier charges 1 lamport.
+## Limits
 
-## Build toolchain pins
+- Devnet only. All money is demo USDC.
+- On devnet the dealer controls the test token's multiplier, so it could force a void. Buyers would get refunds, not payouts. With the real xStocks tokens the issuer sets the multiplier, not the dealer.
+- Pricing uses two years of weekend gaps per stock as a proxy. The program checks the dealer's signature on a quote, not the pricing model.
 
-Anchor 0.30.1 with the Solana platform tools (cargo 1.84) needs some lockfile pins:
+## Author
 
-- `rust-version = "1.84"` in `programs/gap_cover/Cargo.toml`, and the lockfile was generated
-  with `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile`.
-- `blake3` pinned to 1.5.5 (newer pulls `digest` 0.11, which needs edition 2024).
-- `proc-macro2` pinned to 1.0.94.
-
-`anchor build` compiles the program but its IDL step fails on current host toolchains
-(anchor-syn 0.30.1 and proc-macro2 / ark-ff-macros incompatibilities). The IDL is therefore
-kept by hand in `idl/gap_cover.json`; update it whenever an instruction changes.
-
-## Dealer service
-
-`service/src/server.ts` serves quotes, sandbox markets, the sandbox fee-payer relay and the devnet faucet:
-`GET /quote?market&buyer&contracts`, `POST /sandbox/start {mode}`, `POST /sandbox/bell {market}`, `GET /relay`,
-`POST /relay {transaction}`, `POST /faucet {wallet}`. Keys load from file paths in `DEALER_KEYPAIR`,
-`DEMO_AUTHORITY_KEYPAIR`, `RELAY_KEYPAIR` (a separate key holding only SOL for fees) and optionally `QUOTE_KEYPAIR`.
-They are never logged or returned.
-
-The program enforces the dealer's signature on a quote, not the pricing model. Every quote response carries the
-formula inputs (NVDAx reference, Friday reference, `m`, base, uncertainty, utilisation, reserve) so the app can
-show them.
-
-**Historical gaps.** `service/data/nvda-gaps.csv` holds the last 104 NVDA weekends, built by
-`node scripts/build-gaps.mjs` from free daily bars. They are a proxy: Friday regular close to Monday regular open,
-not the 15:59:30 ET Friday and 09:31:30 ET Monday marks the program settles on.
-
-**Relay rules.** The relay co-signs only a legacy transaction with at most 3 instructions whose fee payer is the
-relay key and which contains exactly one `gap_cover` instruction: `buy` (index 1, with its inline Ed25519 quote at
-index 0), `claim` or `refund`, on a sandbox market. The only other instruction allowed is one
-`SetComputeUnitLimit` of at most 400_000. The relay key may not appear in any instruction, and the only signers are
-the relay key and the user.
-The relay also limits requests per IP (20 a minute) and per wallet (10 a minute) and stops co-signing when the relay
-key holds less than 0.05 SOL. The faucet allows one drip per wallet every 10 minutes (kept in `logs/faucet-cooldown.json` across restarts) and
-10 drips a minute overall. Its SOL comes from a separate `FAUCET_KEYPAIR`, never the dealer key that pays the
-keeper's fees, and only to a wallet holding under 0.003 SOL, at most 0.25 SOL an hour in all. Without that key the
-faucet sends tokens only.
-The service only treats an account as a market when the gap_cover program owns it.
-
-**Sandbox multiplier-void demo.** In this mode the service changes the test mint's multiplier when the judge rings
-the Monday bell, after buying has closed, rather than right after the first sale. It then submits a Monday price
-equal to the Friday price, and `finalise_monday` voids the market so buyers can claim refunds.
-The Monday bell acts only on sandbox markets this service started (kept in `logs/sandbox-markets.json`, path set by
-`SANDBOX_MARKETS_PATH`). Multiplier-void mode only ever changes the configured NVDAx (test) mint from
-`config/devnet.json`, never a mint read from an account.
-
-**Trust: the dealer can force a void on devnet.** The program checks signatures, windows and eligibility; it does
-not check that the dealer behaves fairly. On devnet the NVDAx mint is a test mint, and the dealer key holds its
-multiplier authority. A real market voids at `finalise_monday` if the mint's multiplier differs from the one at
-creation. So the dealer could watch the Monday price, and if the market would pay out, change the multiplier before
-anyone calls `finalise_monday`. The market then voids: buyers get their premiums back as refunds, not payouts. Funds
-are never lost, but the cover is only as good as the dealer's restraint. The mainnet design uses the real NVDAx
-token, whose multiplier is set by its issuer and not by the dealer, so the dealer would hold no such option there.
-
-**Deployment behind a proxy.** Per-IP limits use the socket address by default. Set `TRUST_PROXY=1` only when the
-service sits behind a reverse proxy you control. The limits then use the first `X-Forwarded-For` hop, which a client
-can forge when no proxy is in front.
-
-See `docs/deploy-service.md` for the image, required settings and the volume for `logs/`.
+Built by Adnan Husayn. [github.com/Adnan-Husayn](https://github.com/Adnan-Husayn)
