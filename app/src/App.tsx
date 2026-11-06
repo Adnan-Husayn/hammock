@@ -244,7 +244,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
           <div><dt>Marks</dt><dd>The payout compares the Friday 16:00 ET mark with the Monday 09:30 ET mark.</dd></div>
           <div><dt>Pyth</dt><dd>Both marks are signed Pyth prices. Token prices over the weekend do not count.</dd></div>
           <div><dt>Band</dt><dd>Nothing at a fall of 1% or less. Rises to $1.00 per contract at 5%. Past 5%, the payout stays at $1.00 and your net loss grows again.</dd></div>
-          <div><dt>Size</dt><dd>One contract per $25 of the token keeps net loss flat across the band.</dd></div>
+          <div><dt>Size</dt><dd>One contract per $25 of the token keeps net loss flat across the band. More than one contract per $25 turns cover into a bet on the fall.</dd></div>
         </dl>
         {howOpen && (
           <div className="reveal">
