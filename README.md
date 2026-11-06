@@ -2,6 +2,8 @@
 
 Weekend gap cover for tokenised stocks on Solana.
 
+**Live app (devnet):** https://hammock-finance.vercel.app
+
 The US stock market closes at 16:00 ET on Friday and opens at 09:30 ET on Monday. Tokenised stocks such as NVDAx keep trading all weekend, but the price that matters for a holder is where the real stock opens on Monday. Hammock lets a holder buy cover before the weekend. If the stock opens Monday more than 1% below Friday's close, Hammock pays out in USDC.
 
 Built for the Solana Foundation Perps and Prediction Markets hackathon. Runs on devnet with demo USDC and test tokens.
