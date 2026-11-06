@@ -500,3 +500,11 @@ footer { border-top:1px solid var(--rule); padding-top:18px; margin-top:48px; co
   .cover-card .compare { font-size:16px; }
   .cover-card .hero-line { gap:2px; }
 }
+/* Settled card fits a 900px laptop screen */
+.cover-card .perf { margin-top:10px; }
+.cover-card .pass-body { padding-top:10px; }
+.cover-card .what-now { margin-bottom:6px; }
+.cover-card .sum-line { padding-top:6px; }
+.cover-card .card-actions { margin-top:8px; }
+.cover-card .source-line { margin-bottom:4px; }
+.cover-card .marks-note { margin:4px 0 0; }
