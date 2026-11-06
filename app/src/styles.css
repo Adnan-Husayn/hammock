@@ -544,3 +544,9 @@ button.primary:not(:disabled):active { transform:translateY(2px); box-shadow:0 1
 .foot-link:hover { border-color:var(--signal); color:var(--signal); }
 @media (max-width:640px) { .foot-meta { text-align:left; } }
 .foot-brand .brand { color:var(--ink); }
+/* Selected pills keep their green on hover */
+.pill.is-active:hover, button[aria-pressed="true"]:not(.primary):hover { background:var(--signal); color:var(--on-primary); border-color:var(--signal); }
+/* Stock name roll */
+.ticker { display:inline-flex; overflow:hidden; vertical-align:bottom; padding-bottom:.08em; }
+.tick-ch { display:inline-block; animation:tick .5s cubic-bezier(.2,.9,.25,1.2) both; }
+@keyframes tick { 0% { transform:translateY(105%) rotateX(80deg); opacity:0; filter:blur(3px); color:var(--signal); } 60% { color:var(--signal); filter:blur(0); } 100% { transform:none; opacity:1; color:inherit; } }

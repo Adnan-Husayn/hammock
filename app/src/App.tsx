@@ -48,6 +48,15 @@ const CERTAINTY: Record<Phase, Certainty | null> = { none: null, created: "obser
 
 export { DEMO_WEEKEND_MS };
 
+/** The stock name rolls in letter by letter when the stock changes. */
+function Ticker({ text }: { text: string }) {
+  return (
+    <span className="ticker" key={text} aria-label={text}>
+      {[...text].map((ch, i) => <span key={i} className="tick-ch" aria-hidden="true" style={{ animationDelay: `${i * 45}ms` }}>{ch}</span>)}
+    </span>
+  );
+}
+
 /** The mark: two posts and the line slung between them. */
 function Glyph() {
   return (
@@ -155,7 +164,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
   const holdingLabel = deps.wallet ? "Your holding" : "Demo holding";
   const onLanding = !flow && !demo && !real;
   const holdingText = fmtUsd(holding).replace(/\.00$/, "");
-  const headline = <>You hold <span className="money">{holdingText}</span> of {symbol}x.</>;
+  const headline = <>You hold <span className="money">{holdingText}</span> of <Ticker text={`${symbol}x`} />.</>;
 
   const demoActions = demo?.status === "Monday mark final"
     ? <button className="primary" data-testid="claim" onClick={() => record({ ...demo, status: "Claimed" })}>Claim {fmtUsd(payoutFor(demo))} USDC</button>
@@ -183,7 +192,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
       {onLanding && (
         <section className="landing" data-testid="landing">
           <span className="kicker">Weekend gap cover</span>
-          <h1 className="hero swap" key={`h-${symbol}`}>{headline}</h1>
+          <h1 className="hero">{headline}</h1>
           <p className="lead" data-testid="market-closed">Stock market closed for 65h 30m. Token still trades. A Monday mark over 1% below Friday's pays you in USDC, up to {fmtUsd(contracts).replace(/\.00$/, "")}.</p>
           <div className="row actions">
             <button className="primary" data-testid="run-demo" onClick={startDemo}>Run a demo weekend</button>
@@ -243,7 +252,7 @@ export default function App({ deps, walletButton, onConnectWallet }: { deps: App
             <Replays deps={deps} />
             <QuickWeekend key={`q-${symbol}`} deps={deps} symbol={symbol} onConnect={onConnectWallet} />
             {sandbox ? <Sandbox key={symbol} deps={deps} symbol={symbol} /> : (
-              <p className="note"><button className="link" onClick={() => setSandbox(true)}>Sandbox with step-by-step controls</button></p>
+              <p className="note"><button className="toggle" onClick={() => setSandbox(true)}>Open the step-by-step sandbox</button></p>
             )}
           </div>
         )}
