@@ -550,3 +550,4 @@ button.primary:not(:disabled):active { transform:translateY(2px); box-shadow:0 1
 .ticker { display:inline-flex; overflow:hidden; vertical-align:bottom; padding-bottom:.08em; }
 .tick-ch { display:inline-block; animation:tick .5s cubic-bezier(.2,.9,.25,1.2) both; }
 @keyframes tick { 0% { transform:translateY(105%) rotateX(80deg); opacity:0; filter:blur(3px); color:var(--signal); } 60% { color:var(--signal); filter:blur(0); } 100% { transform:none; opacity:1; color:inherit; } }
+.cover-card .facts-marks .mark-right, .cover-card .facts-marks .mark-right dt, .cover-card .facts-marks .mark-right dd { text-align:right; align-items:flex-end; }
