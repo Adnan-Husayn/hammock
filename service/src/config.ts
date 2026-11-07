@@ -25,25 +25,25 @@ export type MarketConfig = {
 /**
  * Markets the service can run. The devnet test mint for each symbol lives in config/devnet.json (testMints).
  *
- * Caps are PROVISIONAL, from plan Task 0 step 5 applied to the logger data available on 3 Nov 2026 (one weekday for
- * most symbols, two close legs for NVDA): per leg, cap = max(provisional, ceil(1.5 * p95 of daily p95)) with
+ * Caps recomputed on 7 Nov 2026 from data/marks.csv (five weekdays per symbol, 29 Oct to 6 Nov; six close legs
+ * for NVDA): per leg, cap = max(provisional, ceil(1.5 * p95 of daily p95)) with
  * provisionals Friday (close leg) 10 and Monday (open leg) 20; min_publishers = 10 unless an observed minimum is below
- * 10, then observed_min - 1. Recompute from data/marks.csv after five weekdays and update these values. The keeper
+ * 10, then observed_min - 1. Recompute from data/marks.csv as more weekdays come in. The keeper
  * and archive read caps from the on-chain Market, so a change here only affects markets created afterwards.
  */
 export const MARKETS: readonly MarketConfig[] = [
-  { symbol: "NVDA", feedId: 1314, mainnetMint: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh", gapsFile: "nvda-gaps.csv", confCapBps: { friday: 10, monday: 20 }, minPublishers: 10, enabled: true },
+  { symbol: "NVDA", feedId: 1314, mainnetMint: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh", gapsFile: "nvda-gaps.csv", confCapBps: { friday: 19, monday: 61 }, minPublishers: 10, enabled: true },
   // TSLA open-leg p95 was 44.27 bps on 2 Nov: 1.5 * 44.27 -> 67. Close leg 10.37 -> 16.
   { symbol: "TSLA", feedId: 1435, mainnetMint: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB", gapsFile: "tsla-gaps.csv", confCapBps: { friday: 16, monday: 67 }, minPublishers: 10, enabled: true },
-  { symbol: "SPY", feedId: 1398, mainnetMint: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W", gapsFile: "spy-gaps.csv", confCapBps: { friday: 10, monday: 20 }, minPublishers: 10, enabled: true },
-  { symbol: "AAPL", feedId: 922, mainnetMint: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp", gapsFile: "aapl-gaps.csv", confCapBps: { friday: 10, monday: 20 }, minPublishers: 10, enabled: true },
+  { symbol: "SPY", feedId: 1398, mainnetMint: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W", gapsFile: "spy-gaps.csv", confCapBps: { friday: 10, monday: 20 }, minPublishers: 8, enabled: true },
+  { symbol: "AAPL", feedId: 922, mainnetMint: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp", gapsFile: "aapl-gaps.csv", confCapBps: { friday: 13, monday: 32 }, minPublishers: 10, enabled: true },
   // Later. No gap files yet: run node scripts/build-gaps.mjs GOOGL MSFT META QQQ AMZN before enabling.
-  { symbol: "GOOGL", feedId: 1163, mainnetMint: "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN", gapsFile: "googl-gaps.csv", confCapBps: { friday: 10, monday: 20 }, minPublishers: 10, enabled: false },
-  { symbol: "MSFT", feedId: 1292, mainnetMint: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX", gapsFile: "msft-gaps.csv", confCapBps: { friday: 12, monday: 20 }, minPublishers: 10, enabled: false },
-  { symbol: "META", feedId: 1272, mainnetMint: "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu", gapsFile: "meta-gaps.csv", confCapBps: { friday: 10, monday: 28 }, minPublishers: 10, enabled: false },
+  { symbol: "GOOGL", feedId: 1163, mainnetMint: "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN", gapsFile: "googl-gaps.csv", confCapBps: { friday: 15, monday: 38 }, minPublishers: 10, enabled: false },
+  { symbol: "MSFT", feedId: 1292, mainnetMint: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX", gapsFile: "msft-gaps.csv", confCapBps: { friday: 13, monday: 26 }, minPublishers: 10, enabled: false },
+  { symbol: "META", feedId: 1272, mainnetMint: "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu", gapsFile: "meta-gaps.csv", confCapBps: { friday: 17, monday: 43 }, minPublishers: 10, enabled: false },
   // QQQ close leg saw 9 publishers, so its minimum is 8.
-  { symbol: "QQQ", feedId: 1363, mainnetMint: "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ", gapsFile: "qqq-gaps.csv", confCapBps: { friday: 10, monday: 20 }, minPublishers: 8, enabled: false },
-  { symbol: "AMZN", feedId: 954, mainnetMint: "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg", gapsFile: "amzn-gaps.csv", confCapBps: { friday: 10, monday: 22 }, minPublishers: 10, enabled: false },
+  { symbol: "QQQ", feedId: 1363, mainnetMint: "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ", gapsFile: "qqq-gaps.csv", confCapBps: { friday: 11, monday: 20 }, minPublishers: 7, enabled: false },
+  { symbol: "AMZN", feedId: 954, mainnetMint: "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg", gapsFile: "amzn-gaps.csv", confCapBps: { friday: 14, monday: 46 }, minPublishers: 10, enabled: false },
 ];
 
 export const DEFAULT_SYMBOL = "NVDA";

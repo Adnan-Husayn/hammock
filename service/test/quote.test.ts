@@ -100,7 +100,7 @@ describe("decodeMarket / decodeLastNonce", () => {
     expect(p.friday_target_ts.toString()).toBe("1000");
     expect(p.monday_target_ts.toString()).toBe("1601");
     expect(p.buying_close_ts.toString()).toBe("1600");
-    expect([p.band_lower_bps, p.band_upper_bps, p.friday_conf_cap_bps, p.monday_conf_cap_bps, p.min_publishers]).toEqual([100, 500, 10, 20, 10]);
+    expect([p.band_lower_bps, p.band_upper_bps, p.friday_conf_cap_bps, p.monday_conf_cap_bps, p.min_publishers]).toEqual([100, 500, 19, 61, 10]);
     expect([p.max_contracts, p.bounty_per_leg.toString(), p.sandbox]).toEqual([200, "100000", true]);
     expect(p.dealer_quote_key.equals(pk(5)) && p.demo_authority.equals(pk(6))).toBe(true);
     expect(p.sandbox_mode).toEqual({ MultiplierVoid: {} });
