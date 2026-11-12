@@ -19,7 +19,7 @@ describe("create-real-market params", () => {
     expect([iso(p.fridayTargetTs), iso(p.mondayTargetTs), iso(p.buyingCloseTs)]).toEqual([
       "2026-11-06T20:59:30.000Z", "2026-11-09T14:31:30.000Z", "2026-11-08T22:50:00.000Z",
     ]);
-    expect(p).toMatchObject({ sandbox: false, demoAuthority: PublicKey.default, maxContracts: DEFAULT_MAX_CONTRACTS, fridayConfCapBps: 10, mondayConfCapBps: 20, minPublishers: 10 });
+    expect(p).toMatchObject({ sandbox: false, demoAuthority: PublicKey.default, maxContracts: DEFAULT_MAX_CONTRACTS, fridayConfCapBps: 19, mondayConfCapBps: 61, minPublishers: 10 });
     expect(reserveUsdc(p)).toBe(1_000_200_000n);
   });
 
