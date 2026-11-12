@@ -13,5 +13,31 @@
     "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
     "dealerAta": "CWaaKWYhaJyS3vLN6Q38z8y3U5vpLsYwdBMhbkBmoBuu",
     "dealerBalance": 10000
+  },
+  "testMints": {
+    "NVDA": {
+      "mint": "FkNwiFzHTWL5cA2WDKmuGJQkfqcsqYMthL3Jq3pDW9Dh",
+      "decimals": 8,
+      "program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "scaledUiMultiplier": 1
+    },
+    "TSLA": {
+      "mint": "Akz7SHhLJGuSW9pCXNptdNtY5VYKj5iatJ7V4zUksrg4",
+      "decimals": 8,
+      "program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "scaledUiMultiplier": 1
+    },
+    "SPY": {
+      "mint": "58u9hddyBm3aXxEji4EkzLT286Ks5DDdDuJWP8yAbC6E",
+      "decimals": 8,
+      "program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "scaledUiMultiplier": 1
+    },
+    "AAPL": {
+      "mint": "9sxgiSFsL7ZYoWHfmEgfGc6UJckQ9Tvcr2695JXP3wxa",
+      "decimals": 8,
+      "program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "scaledUiMultiplier": 1
+    }
   }
 }
