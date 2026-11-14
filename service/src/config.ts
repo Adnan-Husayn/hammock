@@ -113,3 +113,11 @@ export function corsOrigin(env: NodeJS.ProcessEnv = process.env): string {
   if (env.NODE_ENV === "production" && (!v || v === "*")) throw new Error("CORS_ORIGIN must be set to the app origin when NODE_ENV=production");
   return v || "*";
 }
+
+/** CORS_ORIGIN may list several origins, comma-separated. Returns the header value for one request: the request's
+ *  own origin when it is on the list, otherwise the first listed origin (so an unlisted page is still refused). */
+export function allowOriginFor(configured: string | undefined, requestOrigin: string | undefined): string {
+  if (!configured || configured === "*") return "*";
+  const list = configured.split(",").map((o) => o.trim()).filter(Boolean);
+  return requestOrigin && list.includes(requestOrigin) ? requestOrigin : list[0];
+}

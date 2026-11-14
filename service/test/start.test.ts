@@ -7,7 +7,7 @@ import { ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Ed25519Program, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { finaliseInstruction, finaliseInstructions } from "../src/chain.ts";
-import { PYTH_ENDPOINTS, corsOrigin } from "../src/config.ts";
+import { PYTH_ENDPOINTS, allowOriginFor, corsOrigin } from "../src/config.ts";
 import { decodeMarket } from "../src/quote.ts";
 import { autoStopProblem, startService } from "../src/server.ts";
 import type { SignedUpdate } from "../src/pyth.ts";
@@ -520,6 +520,11 @@ describe("CORS origin", () => {
   });
   it("defaults to any origin elsewhere and is sent on responses", async () => {
     expect(corsOrigin({})).toBe("*");
+    const two = "https://a.example, https://b.example";
+    expect(allowOriginFor(two, "https://b.example")).toBe("https://b.example");
+    expect(allowOriginFor(two, "https://evil.example")).toBe("https://a.example");
+    expect(allowOriginFor(two, undefined)).toBe("https://a.example");
+    expect(allowOriginFor(undefined, "https://x.example")).toBe("*");
     const c = setup();
     c.env.CORS_ORIGIN = "https://app.example";
     const url = await start(c, []);

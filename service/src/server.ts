@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { solanaChain } from "./chain.ts";
-import { DEFAULT_SYMBOL, PYTH_ENDPOINTS, SUBMISSION_WINDOW_US, corsOrigin, devnetTestMint, enabledMarkets, loadConfig, marketByFeed, type MarketConfig } from "./config.ts";
+import { DEFAULT_SYMBOL, PYTH_ENDPOINTS, SUBMISSION_WINDOW_US, allowOriginFor, corsOrigin, devnetTestMint, enabledMarkets, loadConfig, marketByFeed, type MarketConfig } from "./config.ts";
 import { StreamHealth, safeError } from "./health.ts";
 import { Alerter } from "./alert.ts";
 import { Keeper, type MarketView } from "./keeper.ts";
@@ -144,7 +144,8 @@ export function serviceServer(d: ServiceDeps): Server {
     // The archive and health are public, so any page may read them; everything else is for the app.
     const path = (req.url ?? "/").split("?")[0];
     const isPublic = ARCHIVE_PATH.test(path) || path === "/health";
-    res.setHeader("Access-Control-Allow-Origin", isPublic ? "*" : (d.corsOrigin ?? "*"));
+    res.setHeader("Access-Control-Allow-Origin", isPublic ? "*" : allowOriginFor(d.corsOrigin, req.headers.origin));
+    if (!isPublic) res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     const send = (status: number, v: unknown) => {
       res.writeHead(status, { "content-type": "application/json" });
