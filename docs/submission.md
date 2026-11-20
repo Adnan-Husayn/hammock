@@ -158,7 +158,7 @@ Demo runs use made-up prices and the app labels them "Demo prices, not Pyth, not
 
 ### With a devnet wallet, on the real program
 
-[FILL: the web app has not been republished since the multi-stock upgrade. Republish it, confirm the stock picker shows NVDA, TSLA, SPY and AAPL and that this flow passes on the live site, then delete this note. Until then the steps below are checked for NVDA only.]
+The app was republished on 20 November with all four stocks. The hosted end-to-end script passed buy, Monday mark and claim for NVDA, TSLA, SPY and AAPL on 14 November. [FILL: click through steps 1 to 7 in a browser for one stock other than NVDA, then delete this note.]
 
 1. Set a Solana wallet to devnet and connect it. You do not need any SOL or tokens.
 2. In "How cover works", press "Show details".
@@ -173,7 +173,20 @@ Sandbox markets use prices set by a demo authority and the app labels them "Sand
 
 ### The verified market
 
-[FILL: confirm the deployed app shows the 9 Nov practice market under "Replay a weekend", "Verified replay". It needs VITE_VERIFIED_MARKET set to `4hq55H24V9VPGsXZs8cyp4jCF69g2SKTaNNw45Dx7kug` at build time. If it is set, add the step here.]
+The live build sets VITE_VERIFIED_MARKET to the 9 November practice market. [FILL: open "Replay a weekend", "Verified replay", confirm it shows that market, add the step here and delete this note.]
+
+### Real markets, 27 to 30 November
+
+I created four real markets on 20 November, one per stock. Each uses Pyth marks only: Friday 27 November at 12:59:30 ET (an early-close day) and Monday 30 November at 09:31:30 ET. Buying closes Sunday 29 November at 17:50 ET. Each market takes up to 1,000 contracts.
+
+| Stock | Market account |
+|---|---|
+| NVDA | `9iZUBszuV3iAQzwKCmfRqUMDKEJZ2TEJYJDRuJWM1NFf` |
+| TSLA | `BJado2pmMKk5nuqnLg6PyUf2ph4NPjbe6FEkZvZxxUFi` |
+| SPY | `BXBoRTPr9swiUV7hQ3kRZShPVW6sP9rC11JTZyesqwuV` |
+| AAPL | `6J7iWXNBWNqivq5kUDZwV23c9fiMuYB1LtYDj1HscRiu` |
+
+Cover on these markets is on sale from the Friday mark until buying closes. After 30 November they stay readable on Explorer and the results are in the section above.
 
 You can read the practice market account on Solana Explorer at any time:
 https://explorer.solana.com/address/4hq55H24V9VPGsXZs8cyp4jCF69g2SKTaNNw45Dx7kug?cluster=devnet
