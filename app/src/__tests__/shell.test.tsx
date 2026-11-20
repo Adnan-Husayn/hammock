@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import App from "../App";
 import { CoverCard } from "../components/CoverCard";
 import { realStatus } from "../components/RealCover";
-import { receiptText, STATUSES, sumLine, type CoverRecord } from "../lib/cover";
+import { receiptText, STATUSES, sumLine, whatNow, type CoverRecord } from "../lib/cover";
 import { readout, SAMPLE_PREMIUM } from "../lib/line";
 import { LEDGER_KEY, totals } from "../lib/ledger";
 import { PRODUCT_NAME } from "../brand";
@@ -297,5 +297,14 @@ describe("ledger on load", () => {
     expect(loadLedger().map((c) => c.id)).toEqual(["c", "d"]);
     render(<App deps={deps({ market: null, wallet: false })} />);
     expect(screen.getAllByTestId("ledger-row").map((r) => r.getAttribute("data-status"))).toEqual(["Claimed", "Expired, no payout"]);
+  });
+  it("states the settlement mark times and never calls the Monday mark the open", () => {
+    render(<App deps={deps({ market: null, wallet: false })} />);
+    const how = screen.getByTestId("how").textContent!;
+    expect(how).toContain("Friday 15:59:30 ET mark (12:59:30 ET on early-close Fridays)");
+    expect(how).toContain("Monday 09:31:30 ET mark");
+    expect(how).not.toMatch(/16:00 ET mark|09:30 ET mark|the open/i);
+    const c = { kind: "real", status: "Cover active" } as unknown as CoverRecord;
+    expect(whatNow(c)).toBe("The Monday 09:31:30 ET mark decides the payout.");
   });
 });
